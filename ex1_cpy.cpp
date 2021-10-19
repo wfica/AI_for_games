@@ -20,6 +20,41 @@ using WinCnt = pair<int, int>;
 using PossibleMoves = unordered_map<Stone, WinCnt, pair_hash>;
 enum StoneType { EMPTY, MY, OTHER };
 
+StoneType OpponentStoneType(const StoneType &my_type) {
+  return my_type == MY ? OTHER : MY;
+}
+
+class IBoard {
+ public:
+  virtual void PlaceStone(const Stone &place, const StoneType xo) = 0;
+};
+
+
+class SimpleBoard : public IBoard{
+    void PlaceStone(const Stone &place, const StoneType xo) override {
+        const auto [x, y] = place;
+        tab[x][y] = xo;
+    }
+    StoneType tab[3][3];
+};
+
+template <typename TBoard>
+class IAgent {
+ public:
+  IAgent(const TBoard &board, StoneType my_stone_type)
+      : board_{board}, my_stone_type_{my_stone_type_} {
+    static_assert(is_base_of<IBoard, TBoard>::value == true);
+  }
+  virtual Stone MyMove() = 0;
+  void OpponentMove(const Stone &position) {
+    board_.PlaceStone(position, OpponentStoneType(my_stone_type_));
+  }
+
+ private:
+  TBoard &board_;
+  StoneType my_stone_type_;
+};
+
 float WinRatio(WinCnt stats) {
   if (stats.second == 0)
     return 0.;
@@ -175,6 +210,7 @@ struct Board {
 
 int main() {
   cerr << WinRatio({7, 10});
+  SimpleBoard sb;
 
   // game loop
   Board board({}, {});
