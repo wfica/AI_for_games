@@ -15,45 +15,21 @@ struct pair_hash {
   }
 };
 
+ostream &operator<<(ostream &os, const pair<int, int> &x) {
+  os << x.first << ", " << x.second;
+  return os;
+}
+
+constexpr bool VERBOSE = false;
+constexpr int FLAT_MC_REPS = 100;
 using Stone = pair<int, int>;
 using WinCnt = pair<int, int>;
 using PossibleMoves = unordered_map<Stone, WinCnt, pair_hash>;
-enum StoneType { EMPTY, MY, OTHER };
+enum StoneType { EMPTY, X, O };
 
 StoneType OpponentStoneType(const StoneType &my_type) {
-  return my_type == MY ? OTHER : MY;
+  return my_type == X ? O : X;
 }
-
-class IBoard {
- public:
-  virtual void PlaceStone(const Stone &place, const StoneType xo) = 0;
-};
-
-
-class SimpleBoard : public IBoard{
-    void PlaceStone(const Stone &place, const StoneType xo) override {
-        const auto [x, y] = place;
-        tab[x][y] = xo;
-    }
-    StoneType tab[3][3];
-};
-
-template <typename TBoard>
-class IAgent {
- public:
-  IAgent(const TBoard &board, StoneType my_stone_type)
-      : board_{board}, my_stone_type_{my_stone_type_} {
-    static_assert(is_base_of<IBoard, TBoard>::value == true);
-  }
-  virtual Stone MyMove() = 0;
-  void OpponentMove(const Stone &position) {
-    board_.PlaceStone(position, OpponentStoneType(my_stone_type_));
-  }
-
- private:
-  TBoard &board_;
-  StoneType my_stone_type_;
-};
 
 float WinRatio(WinCnt stats) {
   if (stats.second == 0)
@@ -62,52 +38,98 @@ float WinRatio(WinCnt stats) {
     return 1. * stats.first / stats.second;
 }
 
-struct Board {
-  Board(const vector<Stone> &my, const vector<Stone> &other) {
-    for (int i = 0; i < 3; ++i) {
+class IBoard {
+ public:
+  virtual void PlaceStone(const Stone &place, const StoneType xo) = 0;
+  // Copies the board. Performs my_mv and then random moves. Returns the winner
+  // of the random game.
+  virtual StoneType RandomPolicy(const Stone &my_mv) = 0;
+  virtual StoneType Winner() = 0;
+  virtual const unordered_set<Stone, pair_hash> &GetPossibleMoves() = 0;
+  virtual const StoneType &GetCurrentPlayer() = 0;
+};
+
+class SimpleBoard : public IBoard {
+ public:
+  SimpleBoard(const StoneType &curr_player) : current_player_{curr_player} {
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j) {
+        tab[i][j] = EMPTY;
+        possible_moves_.insert({i, j});
+      }
+  }
+
+  SimpleBoard(const map<Stone, StoneType> &stones, const StoneType curr_player)
+      : current_player_{curr_player} {
+    for (int i = 0; i < 3; ++i)
       for (int j = 0; j < 3; ++j) {
         tab[i][j] = EMPTY;
       }
-    }
-    for (auto [x, y] : my) {
-      tab[x][y] = MY;
-    }
-    for (auto [x, y] : other) {
-      tab[x][y] = OTHER;
-    }
 
-    for (int i = 0; i < 3; ++i) {
-      for (int j = 0; j < 3; ++j) {
-        possMoves.insert({{i, j}, {0, 0}});
-      }
+    for (auto &[stone, type] : stones) {
+      const auto [x, y] = stone;
+      tab[x][y] = type;
     }
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j)
+        if (tab[i][j] == EMPTY) possible_moves_.insert({i, j});
+  }
+  SimpleBoard(const SimpleBoard &other) {
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j) tab[i][j] = other.tab[i][j];
+    current_player_ = other.current_player_;
+    possible_moves_ = other.possible_moves_;
+  }
+  void PlaceStone(const Stone &mv, const StoneType xo) override {
+    const auto [x, y] = mv;
+    if (x == -1 && y == -1) return;
+
+    tab[x][y] = xo;
+    possible_moves_.erase(mv);
+    current_player_ = OpponentStoneType(current_player_);
+  }
+  StoneType RandomPolicy(const Stone &mv) override {
+    if (VERBOSE) cerr << "RandomPolicy" << endl;
+
+    SimpleBoard cpy = *this;
+
+    cpy.PlaceStone(mv, current_player_);
+
+    while (cpy.Winner() == EMPTY && !cpy.possible_moves_.empty()) {
+      auto it = cpy.possible_moves_.begin();
+      advance(it, rand() % cpy.possible_moves_.size());
+      Stone move = *it;
+      if (VERBOSE) cerr << cpy.current_player_ << " chose " << move << endl;
+
+      cpy.PlaceStone(move, cpy.current_player_);
+    }
+    if (VERBOSE) cerr << "RandomPolicy winner" << cpy.Winner() << endl;
+
+    return cpy.Winner();
   }
 
-  Board(const Board &other) {
-    for (int i = 0; i < 3; ++i) {
-      for (int j = 0; j < 3; ++j) {
-        tab[i][j] = other.tab[i][j];
-      }
-    }
-    possMoves = other.possMoves;
+  const unordered_set<Stone, pair_hash> &GetPossibleMoves() override {
+    return possible_moves_;
   }
 
-  StoneType Winner() const {
+  const StoneType &GetCurrentPlayer() override { return current_player_; }
+
+  StoneType Winner() override {
     for (int i = 0; i < 3; ++i) {
       int cnt_me = 0;
       int cnt_other = 0;
       for (int j = 0; j < 3; ++j) {
-        if (tab[i][j] == MY) {
+        if (tab[i][j] == X) {
           cnt_me++;
-        } else if (tab[i][j] == OTHER) {
+        } else if (tab[i][j] == O) {
           cnt_other++;
         }
       }
       if (cnt_other == 3) {
-        return OTHER;
+        return O;
       }
       if (cnt_me == 3) {
-        return MY;
+        return X;
       }
     }
 
@@ -115,17 +137,17 @@ struct Board {
       int cnt_me = 0;
       int cnt_other = 0;
       for (int j = 0; j < 3; ++j) {
-        if (tab[j][i] == MY) {
+        if (tab[j][i] == X) {
           cnt_me++;
-        } else if (tab[i][j] == OTHER) {
+        } else if (tab[i][j] == O) {
           cnt_other++;
         }
       }
       if (cnt_other == 3) {
-        return OTHER;
+        return O;
       }
       if (cnt_me == 3) {
-        return MY;
+        return X;
       }
     }
 
@@ -137,89 +159,98 @@ struct Board {
     }
     return EMPTY;
   }
+  StoneType tab[3][3];
+  unordered_set<Stone, pair_hash> possible_moves_;
+  StoneType current_player_;
+};
 
-  Board Move(const Stone move, const StoneType player) {
-    auto [x, y] = move;
-    Board cpy = *this;
-    cpy.tab[x][y] = player;
-    cpy.possMoves.erase(move);
-    return cpy;
+template <typename TBoard>
+class IAgent {
+ public:
+  IAgent(TBoard &board, StoneType my_stone_type)
+      : board_{board}, my_stone_type_{my_stone_type} {
+    static_assert(is_base_of<IBoard, TBoard>::value == true);
+  }
+  virtual Stone MyMove() = 0;
+  void OpponentMove(const Stone &position) {
+    board_.PlaceStone(position, OpponentStoneType(my_stone_type_));
   }
 
-  StoneType NextPlayer(const StoneType current) {
-    if (current == MY)
-      return OTHER;
-    else
-      return MY;
+ public:
+  TBoard &board_;
+  StoneType my_stone_type_;
+};
+
+template <typename TBoard>
+class FlatMCAgent : public IAgent<IBoard> {
+ public:
+  FlatMCAgent(TBoard &board, StoneType my_stone_type)
+      : IAgent(board, my_stone_type) {}
+
+  int WinnerToRate(const StoneType &winner) {
+    if (winner == EMPTY) return 0;
+    if (winner == board_.GetCurrentPlayer()) return 1;
+    return -1;
   }
 
-  bool PlayRandomlyUntillEnd(const Stone &my_mv) {
-    //   cerr << "Playing randomly" << endl;
-    Board cpy = Move(my_mv, MY);
-    StoneType turn = OTHER;
-
-    while (cpy.Winner() == EMPTY && !cpy.possMoves.empty()) {
-      auto it = cpy.possMoves.begin();
-      advance(it, rand() % cpy.possMoves.size());
-      Stone move = it->first;
-      cpy = cpy.Move(move, turn);
-      //   cerr << "Player " << turn << "  --- ";
-      //   cerr << "Chose " << move.first << " "<< move.second;
-      turn = NextPlayer(turn);
+  Stone MyMoveInternal() {
+    unordered_map<Stone, WinCnt, pair_hash> mvs;
+    for (const Stone &mv : board_.GetPossibleMoves()) {
+      mvs[mv] = {0, 0};
     }
-    return cpy.Winner() == MY;
-  }
-
-  void FlatMC(int tries = 100) {
-    //   cerr << "FlatMC" << endl;
-    while (tries--) {
-      // cerr << "tries left " << tries << endl;
-      auto it = possMoves.begin();
-      advance(it, rand() % possMoves.size());
-      const Stone &mv = it->first;
-      bool result = PlayRandomlyUntillEnd(mv);
-      it->second.first += result;
-      it->second.second++;
-    }
-  }
-
-  Stone FindBestMove() {
-    if (possMoves.size() == 9) {
+    if (mvs.size() == 9) {
       return {1, 1};
     }
-    FlatMC();
-    float best = WinRatio(possMoves.begin()->second);
-    Stone best_mv = possMoves.begin()->first;
-    for (const auto [stone, stats] : possMoves) {
+    int reps = FLAT_MC_REPS;
+    if (VERBOSE) cerr << "FLAT MC moves available " << mvs.size() << endl;
+
+    while (reps--) {
+      //   if (VERBOSE) cerr << "reps left " << reps;
+      auto it = mvs.begin();
+      advance(it, rand() % mvs.size());
+      const Stone &mv = it->first;
+      const StoneType &winner = board_.RandomPolicy(mv);
+      mvs[mv].second++;
+      mvs[mv].first += WinnerToRate(winner);
+    }
+
+    float best = WinRatio(mvs.begin()->second);
+    Stone best_mv = mvs.begin()->first;
+    if (VERBOSE) cerr << "Ratings:" << endl;
+    for (const auto &[stone, stats] : mvs) {
       float curr_win_ratio = WinRatio(stats);
+      if (VERBOSE) cerr << "stone: " << stone << " stats: " << stats << endl;
       if (curr_win_ratio > best) {
         best = curr_win_ratio;
         best_mv = stone;
       }
     }
+
     return best_mv;
-    // vector<float> ratios;
-    // transform(possMoves.begin(), possMoves.end(), back_inserter(ratios),
-    //           [](const pair<Stone, WinCnt> &x) { return WinRatio(x.second);
-    //           });
   }
 
-  PossibleMoves possMoves;
-  StoneType tab[3][3];
+  Stone MyMove() override {
+    const Stone best_mv = MyMoveInternal();
+    board_.PlaceStone(best_mv, board_.GetCurrentPlayer());
+    return best_mv;
+  }
 };
 
 int main() {
-  cerr << WinRatio({7, 10});
-  SimpleBoard sb;
+  //   SimpleBoard sb({{{0, 0}, O}, {{1, 1}, O}}, X);
+  SimpleBoard sb(X);
+  FlatMCAgent<SimpleBoard> flat_mc_agent(sb, X);
+
+  // cout << flat_mc_agent.MyMove();
 
   // game loop
-  Board board({}, {});
   while (1) {
     int opponentRow;
     int opponentCol;
     cin >> opponentRow >> opponentCol;
+    // cerr << "opponentRow" << opponentRow << endl;
     cin.ignore();
-    board = board.Move({opponentRow, opponentCol}, OTHER);
+    flat_mc_agent.OpponentMove({opponentRow, opponentCol});
     int validActionCount;
     cin >> validActionCount;
     cin.ignore();
@@ -240,9 +271,7 @@ int main() {
 
     // cerr << "Debug messages..." << endl;
 
-    auto [x, y] = board.FindBestMove();
+    auto [x, y] = flat_mc_agent.MyMove();
     cout << x << " " << y << endl;
-
-    board = board.Move({x, y}, MY);
   }
 }
