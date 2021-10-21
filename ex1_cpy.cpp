@@ -22,6 +22,7 @@ ostream &operator<<(ostream &os, const pair<int, int> &x) {
 
 constexpr bool VERBOSE = false;
 constexpr int FLAT_MC_REPS = 100;
+
 using Stone = pair<int, int>;
 using WinCnt = pair<int, int>;
 using PossibleMoves = unordered_map<Stone, WinCnt, pair_hash>;
@@ -89,7 +90,7 @@ class SimpleBoard : public IBoard {
     current_player_ = OpponentStoneType(current_player_);
   }
   StoneType RandomPolicy(const Stone &mv) override {
-    if (VERBOSE) cerr << "RandomPolicy" << endl;
+    if (VERBOSE) cerr << "RandomPolicy after" << mv << endl;
 
     SimpleBoard cpy = *this;
 
@@ -119,17 +120,17 @@ class SimpleBoard : public IBoard {
       int cnt_me = 0;
       int cnt_other = 0;
       for (int j = 0; j < 3; ++j) {
-        if (tab[i][j] == X) {
+        if (tab[i][j] == current_player_) {
           cnt_me++;
-        } else if (tab[i][j] == O) {
+        } else if (tab[i][j] == OpponentStoneType(current_player_)) {
           cnt_other++;
         }
       }
       if (cnt_other == 3) {
-        return O;
+        return OpponentStoneType(current_player_);
       }
       if (cnt_me == 3) {
-        return X;
+        return current_player_;
       }
     }
 
@@ -137,17 +138,17 @@ class SimpleBoard : public IBoard {
       int cnt_me = 0;
       int cnt_other = 0;
       for (int j = 0; j < 3; ++j) {
-        if (tab[j][i] == X) {
+        if (tab[j][i] == current_player_) {
           cnt_me++;
-        } else if (tab[i][j] == O) {
+        } else if (tab[j][i] == OpponentStoneType(current_player_)) {
           cnt_other++;
         }
       }
       if (cnt_other == 3) {
-        return O;
+        return OpponentStoneType(current_player_);
       }
       if (cnt_me == 3) {
-        return X;
+        return current_player_;
       }
     }
 
@@ -237,11 +238,17 @@ class FlatMCAgent : public IAgent<IBoard> {
 };
 
 int main() {
-  //   SimpleBoard sb({{{0, 0}, O}, {{1, 1}, O}}, X);
+  // SimpleBoard sb({{{0, 0}, O},
+  //                 {{0, 2}, X},
+  //                 {{1, 0}, O},
+  //                 {{1, 2}, O},
+  //                 {{1, 1}, X},
+  //                 {{2, 2}, X}},
+  //                X);
   SimpleBoard sb(X);
   FlatMCAgent<SimpleBoard> flat_mc_agent(sb, X);
 
-  // cout << flat_mc_agent.MyMove();
+  cout << flat_mc_agent.MyMove();
 
   // game loop
   while (1) {
