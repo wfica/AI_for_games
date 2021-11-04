@@ -22,21 +22,21 @@ ostream& operator<<(ostream& os, const pair<T, T>& x) {
   return os;
 }
 
-inline Point operator-(const Point& p, const Point& q) {
+Point operator-(const Point& p, const Point& q) {
   return {p.first - q.first, p.second - q.second};
 }
 
 // cross product
-inline double operator*(const Point& p, const Point& q) {
-  return {p.first * q.second - p.second * q.first};
+double operator*(const Point& p, const Point& q) {
+  return p.first * q.second - p.second * q.first;
 }
 
-inline double Direction(const Point& origin, const Point& a, const Point& b) {
+double Direction(const Point& origin, const Point& a, const Point& b) {
   return (a - origin) * (b - origin);
 }
 
-inline bool SegmentsIntersect(const Point& p1, const Point& p2, const Point& p3,
-                              const Point& p4) {
+bool SegmentsIntersect(const Point& p1, const Point& p2, const Point& p3,
+                       const Point& p4) {
   double d1 = Direction(p3, p4, p1);
   double d2 = Direction(p3, p4, p2);
   double d3 = Direction(p1, p2, p3);
@@ -121,7 +121,7 @@ struct State {
   // - land in a vertical position (tilt angle = 0°)
   // - vertical speed must be limited ( ≤ 40m/s in absolute value)
   // - horizontal speed must be limited ( ≤ 20m/s in absolute value)
-  inline bool SuccessfulLanding(const Point& left, const Point& right) {
+  bool SuccessfulLanding(const Point& left, const Point& right) {
     return (left.second == right.second && rotation_ == 0 &&
             abs(vs_) < MAX_LANDING_VS && abs(hs_) < MAX_LANDING_HS &&
             prev_rotation_ == 0 && abs(prev_vs_) < MAX_LANDING_VS &&
@@ -136,8 +136,8 @@ struct State {
     }
 
     for (int i = 1; i < surface_.size(); ++i) {
-      Point left = surface_[i - 1];
-      Point right = surface_[i];
+      const Point& left = surface_[i - 1];
+      const Point& right = surface_[i];
       if (SegmentsIntersect(prev_pos_, pos_, left, right)) {
         status_ = SuccessfulLanding(left, right) ? LANDED : CRASHED;
       }
