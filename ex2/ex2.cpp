@@ -1,10 +1,11 @@
 #include <bits/stdc++.h>
 
 #include <chrono>
+
 using namespace std;
 
 constexpr bool DEBUG_V2 = false;
-constexpr bool DEBUG_V1 = true;
+constexpr bool DEBUG_V1 = false;
 constexpr double MARS_GRAVITY = 3.711;  // in m/s^2.
 constexpr int MAX_X = 7000;
 constexpr int MAX_Y = 3000;
@@ -78,6 +79,23 @@ struct State {
     initialized_ = true;
   }
 
+  void Validate(int x, int y, double hs, double vs, int fuel, int rotation,
+                int power) {
+    const double eps = 1.0;
+    if (abs(pos_.first - x) > eps)
+      cerr << "Validate x: " << pos_.first << " input: " << x;
+    if (abs(pos_.second - y) > eps)
+      cerr << "Validate y: " << pos_.second << " input: " << y;
+    if (abs(hs_ - hs) > eps) cerr << "Validate hs: " << hs_ << " input: " << hs;
+    if (abs(vs_ - vs) > eps) cerr << "Validate vs: " << vs_ << " input: " << vs;
+    if (abs(fuel_ - fuel) > eps)
+      cerr << "Validate fuel: " << fuel_ << " input: " << fuel;
+    if (abs(rotation_ - rotation) > eps)
+      cerr << "Validate rotation: " << rotation_ << " input: " << rotation;
+    if (abs(thrust_ - power) > eps)
+      cerr << "Validate power: " << thrust_ << " input: " << power;
+  }
+
   void Simulation() {
     while (!IsTerminal()) {
       Move mv = RandomMove();
@@ -127,6 +145,16 @@ struct State {
   }
 
   void MakeMove(const Move& mv) {
+    if (DEBUG_V2 || DEBUG_V1) {
+      if (abs(rotation_ - mv.first) > 15)
+        cerr << "Rotation change must be no more than 15 degrees. Previous: "
+             << rotation_ << " requested: " << mv.first;
+      if (abs(thrust_ - mv.second) > 1)
+        cerr << "Thrust change must be no more than +/-1 . Previous: "
+             << thrust_ << " requested: " << mv.second;
+      if (status_ != FLYING) cerr << "Move not possible in status " << status_;
+    }
+
     prev_rotation_ = rotation_;
     prev_pos_ = pos_;
     prev_vs_ = vs_;
@@ -207,14 +235,17 @@ int main() {
     cin.ignore();
     if (!engine.initialized_) {
       engine.Init(x, y, hs, vs, f, r, p);
-    }
+    } else if (DEBUG_V1 || DEBUG_V2)
+      engine.Validate(x, y, hs, vs, f, r, p);
 
-    if(DEBUG_V1) cerr << "Num of random simulations: " <<  RandomSimulationsUntilTimeout(engine, 95);
+    cerr << "Num of random simulations: "
+         << RandomSimulationsUntilTimeout(engine, 95);
 
     // Write an action using cout. DON'T FORGET THE "<< endl"
     // To debug: cerr << "Debug messages..." << endl;
 
     // R P. R is the desired rotation angle. P is the desired thrust power.
-    cout << "-20 3" << endl;
+    cout << "-10 1" << endl;
+    engine.MakeMove({-10, 1});
   }
 }
