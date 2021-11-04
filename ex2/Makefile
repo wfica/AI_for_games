@@ -7,7 +7,7 @@ CC = g++
 CFLAGS  = -std=c++17 -Wall -Wextra 
 
 # the build target executable:
-TARGET = ex1_cpy
+TARGET = ex2
 
 all: $(TARGET)
 
