@@ -11,15 +11,32 @@ constexpr int MAX_X = 7000;
 constexpr int MAX_Y = 3000;
 constexpr int MAX_LANDING_HS = 20;
 constexpr int MAX_LANDING_VS = 40;
+constexpr int MAX_ROTATION = 90;
+constexpr int MIN_ROTATION = -90;
+constexpr int MAX_THRUST = 4;
+constexpr int MIN_THRUST = 0;
+constexpr size_t CHROMOSOME_LENGTH = 200;
+constexpr size_t POPULATION_SIZE = 100;
+constexpr double GENE_MUTATION_CHANCE = 0.04;
 
-using Point = pair<double, double>;  // x, y.
-using Move = pair<int, int>;         // angle, thrust.
-enum Status { FLYING, CRASHED, LANDED };
+    enum Status {
+      FLYING,
+      CRASHED,
+      LANDED
+    };
+using Point = pair<double, double>;                   // x, y.
+using Move = pair<int, int>;                          // angle, thrust.
+using ChromosomeScore = tuple<double, Status, bool>;  // score, Status, terminal
+                                                      // after applying moves.
 
-template <typename T>
-ostream& operator<<(ostream& os, const pair<T, T>& x) {
-  os << x.first << ", " << x.second;
+template <typename T, typename C>
+ostream& operator<<(ostream& os, const pair<T, C>& x) {
+  os << x.first << " " << x.second;
   return os;
+}
+
+double DoubleRand() {
+  return (double)rand() / RAND_MAX;
 }
 
 Point operator-(const Point& p, const Point& q) {
@@ -104,7 +121,7 @@ struct State {
     }
   }
 
-  Move RandomMove() {
+  Move RandomMove() const {
     int min_angle = max(rotation_ - 15, -90);
     int max_angle = min(rotation_ + 15, 90);
     int angle = rand() % (max_angle - min_angle + 1) + min_angle;
@@ -121,7 +138,7 @@ struct State {
   // - land in a vertical position (tilt angle = 0°)
   // - vertical speed must be limited ( ≤ 40m/s in absolute value)
   // - horizontal speed must be limited ( ≤ 20m/s in absolute value)
-  bool SuccessfulLanding(const Point& left, const Point& right) {
+  bool SuccessfulLanding(const Point& left, const Point& right) const {
     return (left.second == right.second && rotation_ == 0 &&
             abs(vs_) < MAX_LANDING_VS && abs(hs_) < MAX_LANDING_HS &&
             prev_rotation_ == 0 && abs(prev_vs_) < MAX_LANDING_VS &&
@@ -135,11 +152,12 @@ struct State {
       return;
     }
 
-    for (int i = 1; i < surface_.size(); ++i) {
+    for (size_t i = 1; i < surface_.size(); ++i) {
       const Point& left = surface_[i - 1];
       const Point& right = surface_[i];
       if (SegmentsIntersect(prev_pos_, pos_, left, right)) {
         status_ = SuccessfulLanding(left, right) ? LANDED : CRASHED;
+        break;
       }
     }
   }
@@ -184,7 +202,9 @@ struct State {
     UpdateStatus();
   }
 
-  bool IsTerminal() { return status_ != FLYING; }
+  bool IsTerminal() const { return status_ != FLYING; }
+
+  double Score() const { return 1; }
 
   Point pos_;
   Point prev_pos_;
@@ -206,19 +226,80 @@ struct State {
 
 int RandomSimulationsUntilTimeout(const State& state, int miliseconds) {
   int cnt = 0;
-  chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  chrono::steady_clock::time_point begin = chrono::steady_clock::now();
   int diff = 0;
   while (diff < miliseconds) {
     cnt++;
     State state_cpy = state;
     state_cpy.Simulation();
-    chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-    diff =
-        chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
+    chrono::steady_clock::time_point end = chrono::steady_clock::now();
+    diff = chrono::duration_cast<chrono::milliseconds>(end - begin).count();
   }
   if (DEBUG_V2) cerr << "Time difference = " << diff << " [ms] " << endl;
   return cnt;
 }
+
+struct Gene {
+  // Initialize randomly.
+  Gene() : angle_delta_{(rand() % 31) - 15}, thrust_detla_{(rand() % 3) - 1} {}
+
+  Move ToMove(const State& state) const {
+    int rotation =
+        clamp(state.rotation_ + (int)angle_delta_, MIN_ROTATION, MAX_ROTATION);
+    int thrust = clamp(state.thrust_, MIN_THRUST, MAX_THRUST);
+
+    if (DEBUG_V2) {
+      if (abs(state.thrust_ - thrust) > 15)
+        cerr << "ERROR: state.thrust_ = " << state.thrust_
+             << ", thrust = " << thrust;
+      if (abs(state.rotation_ - rotation) > 1)
+        cerr << "ERROR: state.rotation_ = " << state.rotation_
+             << ", rotation = " << rotation;
+    }
+    return {rotation, thrust};
+  }
+
+  void RandomMutation() {
+    angle_delta_ = (rand() % 31) - 15;
+    thrust_detla_ = (rand() % 3) - 1;
+  }
+
+  // Doubles to allow flexible manipulations (mutations/ crossovers). Will be
+  // casetd to ints once applied as a move.
+  double angle_delta_;   // new_angle = angle_ +/-15.
+  double thrust_detla_;  // new_thrust = thrust_ +/-1.
+};
+
+struct Chromosome {
+  Chromosome() : dna_{deque<Gene>(CHROMOSOME_LENGTH)} {}
+
+  ChromosomeScore Evaluate(State state) const {
+    for (size_t i = 0; (i < dna_.size()) && (!state.IsTerminal()); ++i) {
+      Move mv = dna_[i].ToMove(state);
+      state.MakeMove(mv);
+    }
+    bool terminal_reached_within_dna = state.IsTerminal();
+    while (!state.IsTerminal()) {
+      Move mv = state.RandomMove();
+      state.MakeMove(mv);
+    }
+    return {state.Score(), state.status_, terminal_reached_within_dna};
+  }
+
+  void Rollout() {
+    dna_.pop_front();
+    dna_.push_back(Gene());
+  }
+
+  void Mutation() {
+    for(Gene& gene: dna_){
+      if(DoubleRand() < GENE_MUTATION_CHANCE){
+        gene.RandomMutation();
+      }
+    }
+  }
+  deque<Gene> dna_;
+};
 
 int main() {
   State engine;
@@ -245,7 +326,10 @@ int main() {
     // To debug: cerr << "Debug messages..." << endl;
 
     // R P. R is the desired rotation angle. P is the desired thrust power.
-    cout << "-10 1" << endl;
-    engine.MakeMove({-10, 1});
+    Move mv = engine.RandomMove();
+    engine.MakeMove(mv);
+    cout << mv << endl;
+    // cout << "-10 1" << endl;
+    // engine.MakeMove({-10, 1});
   }
 }
