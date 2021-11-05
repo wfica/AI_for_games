@@ -4,8 +4,8 @@
 
 using namespace std;
 
-constexpr bool DEBUG_V2 = true;
-constexpr bool DEBUG_V1 = false;
+constexpr bool DEBUG_V2 = false;
+constexpr bool DEBUG_V1 = true;
 constexpr double MARS_GRAVITY = 3.711;  // in m/s^2.
 constexpr int MAX_X = 7000;
 constexpr int MAX_Y = 3000;
@@ -42,6 +42,17 @@ Point operator-(const Point& p, const Point& q) {
   return {p.first - q.first, p.second - q.second};
 }
 
+Point operator+(const Point& p, const Point& q) {
+  return {p.first + q.first, p.second + q.second};
+}
+
+Point operator/(const Point& p, const double d) {
+  return {p.first / d, p.second / d};
+}
+
+double len2(const Point& v) { return v.first * v.first + v.second * v.second; }
+
+double dist2(const Point& p, const Point& q) { return len2(p - q); }
 // cross product
 double operator*(const Point& p, const Point& q) {
   return p.first * q.second - p.second * q.first;
@@ -91,7 +102,7 @@ struct State {
       cin >> x >> y;
       surface_[i] = {x, y};
       if (y == surface_[i - 1].second) {
-        flat_ground_idx_ = i;
+        flat_ground_idx_ = i - 1;
       }
     }
   }
@@ -222,7 +233,32 @@ struct State {
 
   bool IsTerminal() const { return status_ != FLYING; }
 
-  double Score() const { return 0; }
+  // For a landing to be successful, the ship must:
+  // - land on flat ground
+  // - land in a vertical position (tilt angle = 0°)
+  // - vertical speed must be limited ( ≤ 40m/s in absolute value)
+  // - horizontal speed must be limited ( ≤ 20m/s in absolute value)
+  double Score() const {
+    if (status_ == LANDED) {
+      return 0;
+    }
+
+    Point flat_left = surface_[flat_ground_idx_];
+    Point flat_right = surface_[flat_ground_idx_ + 1];
+    double x_1 = flat_left.first;
+    double x_2 = flat_right.first;
+    double y = flat_left.second;
+
+    if (DEBUG_V2 && y != flat_right.second)
+      cerr << "ERROR: flat ground wrong idx." << endl;
+
+    Point middle_grd = (flat_right + flat_left) / 2.0;
+    double score = dist2(middle_grd, pos_);
+
+    if (DEBUG_V2 || DEBUG_V1) cerr << "Score: " << score << endl;
+
+    return score;
+  }
 
   Point pos_;
   Point prev_pos_;
@@ -264,7 +300,7 @@ struct Gene {
   Move ToMove(const State& state) const {
     int rotation =
         clamp(state.rotation_ + (int)angle_delta_, MIN_ROTATION, MAX_ROTATION);
-    int thrust = clamp(state.thrust_, MIN_THRUST, MAX_THRUST);
+    int thrust = clamp(state.thrust_ + (int)thrust_detla_, MIN_THRUST, MAX_THRUST);
 
     if (DEBUG_V2) {
       if (abs(state.thrust_ - thrust) > 1)
@@ -292,15 +328,23 @@ struct Chromosome {
   Chromosome() : dna_{deque<Gene>(CHROMOSOME_LENGTH)} {}
 
   ChromosomeScore Evaluate(State state) const {
+    if (DEBUG_V2 )
+      cerr << "Evaluate chromosome score for state" << state.pos_ << endl;
     for (size_t i = 0; (i < dna_.size()) && (!state.IsTerminal()); ++i) {
       Move mv = dna_[i].ToMove(state);
       state.MakeMove(mv);
+      if (DEBUG_V2) cerr << "DNA move: " << mv << "moved to " << state.pos_ << endl;
     }
     bool terminal_reached_within_dna = state.IsTerminal();
     while (!state.IsTerminal()) {
       Move mv = state.RandomMove();
       state.MakeMove(mv);
+      if (DEBUG_V2) cerr << "ranom move: " << state.pos_ << endl;
     }
+    if (DEBUG_V2)
+      cerr << "State finaly in: " << state.pos_ << endl
+           << "With score: " << state.Score() << endl;
+
     return {state.Score(), state.status_, terminal_reached_within_dna};
   }
 
@@ -421,6 +465,7 @@ struct Population {
     for (size_t i = 0; i < individuals_.size(); ++i) {
       individuals_[i] = zip[i].second;
     }
+    if(DEBUG_V1) cerr << "Sorted. Best score is " << zip[0].first << endl;
   }
 
   optional<int> winning_idx_;
@@ -434,9 +479,18 @@ int main() {
 
   // return 0;
 
+  // State engine;
+  // Population populationX;
+  // int timeout = 950;
+
+  // for (Gene gene : populationX.individuals_[0].dna_) {
+  //   cout << gene.ToMove() << endl;
+  // }
+
   State engine;
   Population population;
   int timeout = 950;
+
   // game loop
   while (1) {
     int x;
@@ -465,7 +519,6 @@ int main() {
     if (DEBUG_V2)
       cerr << "Time difference is = " << diff << " [ms] " << endl
            << "Num of generations: " << cnt << endl;
-
 
     Gene best_gene = population.RolloutAndReturnBestGene(engine);
     Move mv = best_gene.ToMove(engine);
