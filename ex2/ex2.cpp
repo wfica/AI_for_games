@@ -4,7 +4,7 @@
 
 using namespace std;
 
-constexpr bool DEBUG_V2 = false;
+constexpr bool DEBUG_V2 = true;
 constexpr bool DEBUG_V1 = false;
 constexpr double MARS_GRAVITY = 3.711;  // in m/s^2.
 constexpr int MAX_X = 7000;
@@ -222,7 +222,7 @@ struct State {
 
   bool IsTerminal() const { return status_ != FLYING; }
 
-  double Score() const { return 1; }
+  double Score() const { return 0; }
 
   Point pos_;
   Point prev_pos_;
@@ -267,10 +267,10 @@ struct Gene {
     int thrust = clamp(state.thrust_, MIN_THRUST, MAX_THRUST);
 
     if (DEBUG_V2) {
-      if (abs(state.thrust_ - thrust) > 15)
+      if (abs(state.thrust_ - thrust) > 1)
         cerr << "ERROR: state.thrust_ = " << state.thrust_
              << ", thrust = " << thrust;
-      if (abs(state.rotation_ - rotation) > 1)
+      if (abs(state.rotation_ - rotation) > 15)
         cerr << "ERROR: state.rotation_ = " << state.rotation_
              << ", rotation = " << rotation;
     }
@@ -354,7 +354,7 @@ struct Population {
       children.push_back(child_2);
     }
 
-    for(size_t i = ELITISM; i< individuals_.size(); ++i){
+    for (size_t i = ELITISM; i < individuals_.size(); ++i) {
       individuals_[i] = children.back();
       children.pop_back();
     }
@@ -435,6 +435,8 @@ int main() {
   // return 0;
 
   State engine;
+  Population population;
+  int timeout = 950;
   // game loop
   while (1) {
     int x;
@@ -451,15 +453,32 @@ int main() {
     } else if (DEBUG_V1 || DEBUG_V2)
       engine.Validate(x, y, hs, vs, f, r, p);
 
-    cerr << "Num of random simulations: "
-         << RandomSimulationsUntilTimeout(engine, 95);
+    chrono::steady_clock::time_point begin = chrono::steady_clock::now();
+    int diff = 0, cnt = 0;
+    while (!population.winning_idx_.has_value() && diff < timeout) {
+      cnt++;
+      population.NextGeneration(engine);
+      chrono::steady_clock::time_point end = chrono::steady_clock::now();
+      diff = chrono::duration_cast<chrono::milliseconds>(end - begin).count();
+    }
+    timeout = 95;
+    if (DEBUG_V2)
+      cerr << "Time difference is = " << diff << " [ms] " << endl
+           << "Num of generations: " << cnt << endl;
 
+
+    Gene best_gene = population.RolloutAndReturnBestGene(engine);
+    Move mv = best_gene.ToMove(engine);
+    engine.MakeMove(mv);
+
+    // cerr << "Num of random simulations: "
+    //      << RandomSimulationsUntilTimeout(engine, 95);
     // Write an action using cout. DON'T FORGET THE "<< endl"
     // To debug: cerr << "Debug messages..." << endl;
 
     // R P. R is the desired rotation angle. P is the desired thrust power.
-    Move mv = engine.RandomMove();
-    engine.MakeMove(mv);
+    // Move mv = engine.RandomMove();
+    // engine.MakeMove(mv);
     cout << mv << endl;
     // cout << "-10 1" << endl;
     // engine.MakeMove({-10, 1});
