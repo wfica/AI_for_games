@@ -254,8 +254,20 @@ struct State {
 
     Point middle_grd = (flat_right + flat_left) / 2.0;
     double score = dist2(middle_grd, pos_);
+    if(score < 100){
+       if(DEBUG_V1) cerr << "Distance error: " << score << endl;
+      score += abs(rotation_)*5;
+      if(DEBUG_V1) cerr << "Rotation error: " << score << endl;
+    }
 
-    if (DEBUG_V2 || DEBUG_V1) cerr << "Score: " << score << endl;
+    if(score < 30){
+      score += max(0., abs(vs_) - MAX_LANDING_VS);
+      if(DEBUG_V1) cerr << "vertical speed error: " << score << endl;
+    }
+
+
+
+    if (DEBUG_V1) cerr << "Score: " << score << endl;
 
     return score;
   }
