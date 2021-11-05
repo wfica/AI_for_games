@@ -17,13 +17,10 @@ constexpr int MAX_THRUST = 4;
 constexpr int MIN_THRUST = 0;
 constexpr size_t CHROMOSOME_LENGTH = 200;
 constexpr size_t POPULATION_SIZE = 100;
+constexpr size_t ELITISM = 12;
 constexpr double GENE_MUTATION_CHANCE = 0.04;
 
-    enum Status {
-      FLYING,
-      CRASHED,
-      LANDED
-    };
+enum Status { FLYING, CRASHED, LANDED };
 using Point = pair<double, double>;                   // x, y.
 using Move = pair<int, int>;                          // angle, thrust.
 using ChromosomeScore = tuple<double, Status, bool>;  // score, Status, terminal
@@ -35,8 +32,10 @@ ostream& operator<<(ostream& os, const pair<T, C>& x) {
   return os;
 }
 
-double DoubleRand() {
-  return (double)rand() / RAND_MAX;
+double DoubleRand() { return (double)rand() / RAND_MAX; }
+
+bool IsWinningScore(const ChromosomeScore& score) {
+  return get<1>(score) == LANDED && get<2>(score) == true;
 }
 
 Point operator-(const Point& p, const Point& q) {
@@ -61,6 +60,25 @@ bool SegmentsIntersect(const Point& p1, const Point& p2, const Point& p3,
   return (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
           ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)));
 }
+
+// X ~ Gamma(a, 1) and Y ~ Gamma(b, 1) then Y / (X+Y) ~ Beta(a, b)
+struct BetaGenarator {
+  BetaGenarator(double a, double b) : alpha_{a}, beta_{b} {
+    gamma_distribution_a_1_ = gamma_distribution<double>(a, 1.0);
+    gamma_distribution_b_1_ = gamma_distribution<double>(b, 1.0);
+  }
+
+  double Rand() {
+    double x = gamma_distribution_a_1_(generator_);
+    double y = gamma_distribution_b_1_(generator_);
+    return x / (x + y);
+  }
+
+  default_random_engine generator_;
+  gamma_distribution<double> gamma_distribution_a_1_;
+  gamma_distribution<double> gamma_distribution_b_1_;
+  double alpha_, beta_;
+};
 
 struct State {
   void ReadSurface() {
@@ -286,14 +304,16 @@ struct Chromosome {
     return {state.Score(), state.status_, terminal_reached_within_dna};
   }
 
-  void Rollout() {
+  Gene Rollout() {
+    Gene first_gene = dna_.front();
     dna_.pop_front();
     dna_.push_back(Gene());
+    return first_gene;
   }
 
   void Mutation() {
-    for(Gene& gene: dna_){
-      if(DoubleRand() < GENE_MUTATION_CHANCE){
+    for (Gene& gene : dna_) {
+      if (DoubleRand() < GENE_MUTATION_CHANCE) {
         gene.RandomMutation();
       }
     }
@@ -301,7 +321,119 @@ struct Chromosome {
   deque<Gene> dna_;
 };
 
+bool cmp(const pair<double, Chromosome>& a, const pair<double, Chromosome>& b) {
+  return a.first < b.first;
+}
+
+struct Population {
+  Population()
+      : winning_idx_{nullopt},
+        individuals_{vector<Chromosome>(POPULATION_SIZE)},
+        beta_{BetaGenarator(1., 5.)} {}
+
+  void NextGeneration(const State& state) {
+    // Already know how to win.
+    if (winning_idx_.has_value()) {
+      if (DEBUG_V2)
+        cerr << "Already know how to win. No new genration." << endl;
+      return;
+    }
+    Sort(state);
+    // Already know how to win.
+    if (winning_idx_.has_value()) {
+      if (DEBUG_V2) cerr << "No new genration." << endl;
+      return;
+    }
+
+    // Keep first ELITISM num of chromosoms.
+    vector<Chromosome> children;
+    while (children.size() < individuals_.size() - ELITISM) {
+      auto [parent_1, parent_2] = SelectParents();
+      auto [child_1, child_2] = Crossover(parent_1, parent_2);
+      children.push_back(child_1);
+      children.push_back(child_2);
+    }
+
+    for(size_t i = ELITISM; i< individuals_.size(); ++i){
+      individuals_[i] = children.back();
+      children.pop_back();
+    }
+  }
+
+  pair<Chromosome, Chromosome> SelectParents() {
+    const Chromosome& parent_1 =
+        individuals_[beta_.Rand() * individuals_.size()];
+    const Chromosome& parent_2 =
+        individuals_[beta_.Rand() * individuals_.size()];
+    return {parent_1, parent_2};
+  }
+
+  pair<Chromosome, Chromosome> Crossover(const Chromosome& parent_1,
+                                         const Chromosome& parent_2) {
+    Chromosome child_1, child_2;
+    double rho = DoubleRand();
+    for (size_t i = 0; i < CHROMOSOME_LENGTH; ++i) {
+      child_1.dna_[i].angle_delta_ =
+          parent_1.dna_[i].angle_delta_ * rho +
+          parent_2.dna_[i].angle_delta_ * (1.0 - rho);
+      child_1.dna_[i].thrust_detla_ =
+          parent_1.dna_[i].thrust_detla_ * rho +
+          parent_2.dna_[i].thrust_detla_ * (1.0 - rho);
+
+      child_2.dna_[i].angle_delta_ =
+          parent_1.dna_[i].angle_delta_ * (1.0 - rho) +
+          parent_2.dna_[i].angle_delta_ * rho;
+      child_1.dna_[i].thrust_detla_ =
+          parent_1.dna_[i].thrust_detla_ * (1.0 - rho) +
+          parent_2.dna_[i].thrust_detla_ * rho;
+    }
+    child_1.Mutation();
+    child_2.Mutation();
+    return {child_1, child_2};
+  }
+
+  Gene RolloutAndReturnBestGene(const State& state) {
+    if (winning_idx_.has_value()) {
+      if (DEBUG_V2) cerr << "No rollout." << endl;
+      const int idx = winning_idx_.value();
+      return individuals_[idx].Rollout();
+    }
+    Sort(state);
+    Gene best = individuals_[0].dna_.front();
+    for (Chromosome& chromosome : individuals_) {
+      chromosome.Rollout();
+    }
+    return best;
+  }
+
+  void Sort(const State& state) {
+    vector<pair<double, Chromosome>> zip;
+    for (size_t i = 0; i < individuals_.size(); ++i) {
+      const Chromosome& chromosome = individuals_[i];
+      ChromosomeScore score = chromosome.Evaluate(state);
+      if (IsWinningScore(score)) {
+        winning_idx_ = i;
+        return;
+      }
+      zip.push_back({get<0>(score), chromosome});
+    }
+    sort(zip.begin(), zip.end(), cmp);
+    for (size_t i = 0; i < individuals_.size(); ++i) {
+      individuals_[i] = zip[i].second;
+    }
+  }
+
+  optional<int> winning_idx_;
+  vector<Chromosome> individuals_;
+  BetaGenarator beta_;
+};
+
 int main() {
+  // BetaGenarator beta_(1.0, 5.0);
+  // for (int i = 0; i < 500; ++i) cout << beta_.Rand() << endl;
+
+  // return 0;
+
   State engine;
   // game loop
   while (1) {
