@@ -6,8 +6,8 @@ using namespace std;
 
 constexpr bool DEBUG_V2 = false;
 constexpr bool DEBUG_V1 = false;
-constexpr bool DEBUG_V0 = true;
-constexpr double MARS_GRAVITY = 3.711;  // in m/s^2.
+constexpr bool DEBUG_V0 = false;
+constexpr double MARS_GRAVITY = 3.711; // in m/s^2.
 constexpr int MAX_X = 7000;
 constexpr int MAX_Y = 3000;
 constexpr int MAX_LANDING_HS = 20;
@@ -16,55 +16,55 @@ constexpr int MAX_ROTATION = 90;
 constexpr int MIN_ROTATION = -90;
 constexpr int MAX_THRUST = 4;
 constexpr int MIN_THRUST = 0;
-constexpr size_t CHROMOSOME_LENGTH = 200;
+constexpr size_t CHROMOSOME_LENGTH = 220;
 constexpr size_t POPULATION_SIZE = 100;
 constexpr size_t ELITISM = 12;
-constexpr double GENE_MUTATION_CHANCE = 0.04;
+constexpr double GENE_MUTATION_CHANCE = 0.06;
 
 enum Status { FLYING, CRASHED, LANDED };
-using Point = pair<double, double>;                   // x, y.
-using Move = pair<int, int>;                          // angle, thrust.
-using ChromosomeScore = tuple<double, Status, bool>;  // score, Status, terminal
-                                                      // after applying moves.
+using Point = pair<double, double>;                  // x, y.
+using Move = pair<int, int>;                         // angle, thrust.
+using ChromosomeScore = tuple<double, Status, bool>; // score, Status, terminal
+                                                     // after applying moves.
 
 template <typename T, typename C>
-ostream& operator<<(ostream& os, const pair<T, C>& x) {
+ostream &operator<<(ostream &os, const pair<T, C> &x) {
   os << x.first << " " << x.second;
   return os;
 }
 
 double DoubleRand() { return (double)rand() / RAND_MAX; }
 
-bool IsWinningScore(const ChromosomeScore& score) {
+bool IsWinningScore(const ChromosomeScore &score) {
   return get<1>(score) == LANDED && get<2>(score) == true;
 }
 
-Point operator-(const Point& p, const Point& q) {
+Point operator-(const Point &p, const Point &q) {
   return {p.first - q.first, p.second - q.second};
 }
 
-Point operator+(const Point& p, const Point& q) {
+Point operator+(const Point &p, const Point &q) {
   return {p.first + q.first, p.second + q.second};
 }
 
-Point operator/(const Point& p, const double d) {
+Point operator/(const Point &p, const double d) {
   return {p.first / d, p.second / d};
 }
 
-double len2(const Point& v) { return v.first * v.first + v.second * v.second; }
+double len2(const Point &v) { return v.first * v.first + v.second * v.second; }
 
-double dist2(const Point& p, const Point& q) { return len2(p - q); }
+double dist2(const Point &p, const Point &q) { return len2(p - q); }
 // cross product
-double operator*(const Point& p, const Point& q) {
+double operator*(const Point &p, const Point &q) {
   return p.first * q.second - p.second * q.first;
 }
 
-double Direction(const Point& origin, const Point& a, const Point& b) {
+double Direction(const Point &origin, const Point &a, const Point &b) {
   return (a - origin) * (b - origin);
 }
 
-bool SegmentsIntersect(const Point& p1, const Point& p2, const Point& p3,
-                       const Point& p4) {
+bool SegmentsIntersect(const Point &p1, const Point &p2, const Point &p3,
+                       const Point &p4) {
   double d1 = Direction(p3, p4, p1);
   double d2 = Direction(p3, p4, p2);
   double d3 = Direction(p1, p2, p3);
@@ -133,8 +133,10 @@ struct State {
       cerr << "Validate x: " << pos_.first << " input: " << x;
     if (abs(pos_.second - y) > eps)
       cerr << "Validate y: " << pos_.second << " input: " << y;
-    if (abs(hs_ - hs) > eps) cerr << "Validate hs: " << hs_ << " input: " << hs;
-    if (abs(vs_ - vs) > eps) cerr << "Validate vs: " << vs_ << " input: " << vs;
+    if (abs(hs_ - hs) > eps)
+      cerr << "Validate hs: " << hs_ << " input: " << hs;
+    if (abs(vs_ - vs) > eps)
+      cerr << "Validate vs: " << vs_ << " input: " << vs;
     if (abs(fuel_ - fuel) > eps)
       cerr << "Validate fuel: " << fuel_ << " input: " << fuel;
     if (abs(rotation_ - rotation) > eps)
@@ -147,7 +149,8 @@ struct State {
     while (!IsTerminal()) {
       Move mv = RandomMove();
       MakeMove(mv);
-      if (DEBUG_V2) cerr << "current pos: " << pos_ << endl;
+      if (DEBUG_V2)
+        cerr << "current pos: " << pos_ << endl;
     }
   }
 
@@ -168,7 +171,7 @@ struct State {
   // - land in a vertical position (tilt angle = 0°)
   // - vertical speed must be limited ( ≤ 40m/s in absolute value)
   // - horizontal speed must be limited ( ≤ 20m/s in absolute value)
-  bool SuccessfulLanding(const Point& left, const Point& right) const {
+  bool SuccessfulLanding(const Point &left, const Point &right) const {
     return (left.second == right.second && rotation_ == 0 &&
             abs(vs_) < MAX_LANDING_VS && abs(hs_) < MAX_LANDING_HS &&
             prev_rotation_ == 0 && abs(prev_vs_) < MAX_LANDING_VS &&
@@ -183,16 +186,22 @@ struct State {
     }
 
     for (size_t i = 1; i < surface_.size(); ++i) {
-      const Point& left = surface_[i - 1];
-      const Point& right = surface_[i];
-      if (SegmentsIntersect(prev_pos_, pos_, left, right)) {
+      const Point &left = surface_[i - 1];
+      const Point &right = surface_[i];
+      bool negated_necessary_condition =
+          (pos_.second > left.second && prev_pos_.second > right.second) ||
+          (pos_.first > right.first && prev_pos_.first > right.first) ||
+          (pos_.first < left.first && prev_pos_.first < left.first);
+
+      if (!negated_necessary_condition &&
+          SegmentsIntersect(prev_pos_, pos_, left, right)) {
         status_ = SuccessfulLanding(left, right) ? LANDED : CRASHED;
         break;
       }
     }
   }
 
-  void MakeMove(const Move& mv) {
+  void MakeMove(const Move &mv) {
     if (DEBUG_V2 || DEBUG_V1) {
       if (abs(rotation_ - mv.first) > 15)
         cerr << "Rotation change must be no more than 15 degrees. Previous: "
@@ -200,7 +209,8 @@ struct State {
       if (abs(thrust_ - mv.second) > 1)
         cerr << "Thrust change must be no more than +/-1 . Previous: "
              << thrust_ << " requested: " << mv.second;
-      if (status_ != FLYING) cerr << "Move not possible in status " << status_;
+      if (status_ != FLYING)
+        cerr << "Move not possible in status " << status_;
     }
 
     prev_rotation_ = rotation_;
@@ -248,13 +258,13 @@ struct State {
     Point flat_right = surface_[flat_ground_idx_ + 1];
     double flat_x_1 = flat_left.first;
     double flat_x_2 = flat_right.first;
-    double flat_y = flat_left.second;
+    double flat_y = flat_left.second + 1.;
 
     if (DEBUG_V2 && flat_y != flat_right.second)
       cerr << "ERROR: flat ground wrong idx." << endl;
 
-    double distance_penalty = max(
-        0., (pos_.first - (flat_x_1 + 150)) * (pos_.second - (flat_x_2 - 150)));
+    double distance_penalty = max(0., (pos_.first - (flat_x_1 + 150)) *
+                                          (pos_.second - (flat_x_2 - 150)));
     distance_penalty = sqrt(distance_penalty);
 
     const double vv_mult = 5;
@@ -285,7 +295,7 @@ struct State {
     }
 
     double penalty;
-    if (!(flat_x_1  < pos_.first && pos_.first < flat_x_2 ))
+    if (!(flat_x_1 < pos_.first && pos_.first < flat_x_2))
       penalty = 5;
     else if (abs(flat_y - pos_.second) >= MAX_LANDING_VS)
       penalty = 4;
@@ -307,23 +317,23 @@ struct State {
 
   Point pos_;
   Point prev_pos_;
-  double vs_;  // the vertical speed (in m/s), can be negative.
+  double vs_; // the vertical speed (in m/s), can be negative.
   double prev_vs_;
-  double hs_;  // the horizontal speed (in m/s), can be negative.
+  double hs_; // the horizontal speed (in m/s), can be negative.
   double prev_hs_;
-  int thrust_;    // the thrust power (0 to 4).
-  int fuel_;      // the quantity of remaining fuel in liters.
-  int rotation_;  // the rotation angle in degrees (-90 to 90).
+  int thrust_;   // the thrust power (0 to 4).
+  int fuel_;     // the quantity of remaining fuel in liters.
+  int rotation_; // the rotation angle in degrees (-90 to 90).
   int prev_rotation_;
   Status status_;
 
   bool initialized_;
 
   vector<Point> surface_;
-  int flat_ground_idx_;  // flat ground between point i and i+1.
+  int flat_ground_idx_; // flat ground between point i and i+1.
 };
 
-int RandomSimulationsUntilTimeout(const State& state, int miliseconds) {
+int RandomSimulationsUntilTimeout(const State &state, int miliseconds) {
   int cnt = 0;
   chrono::steady_clock::time_point begin = chrono::steady_clock::now();
   int diff = 0;
@@ -334,7 +344,8 @@ int RandomSimulationsUntilTimeout(const State& state, int miliseconds) {
     chrono::steady_clock::time_point end = chrono::steady_clock::now();
     diff = chrono::duration_cast<chrono::milliseconds>(end - begin).count();
   }
-  if (DEBUG_V2) cerr << "Time difference = " << diff << " [ms] " << endl;
+  if (DEBUG_V2)
+    cerr << "Time difference = " << diff << " [ms] " << endl;
   return cnt;
 }
 
@@ -342,7 +353,7 @@ struct Gene {
   // Initialize randomly.
   Gene() : angle_delta_{(rand() % 31) - 15}, thrust_detla_{1} {}
 
-  Move ToMove(const State& state) const {
+  Move ToMove(const State &state) const {
     int rotation =
         clamp(state.rotation_ + (int)angle_delta_, MIN_ROTATION, MAX_ROTATION);
     int thrust =
@@ -366,8 +377,8 @@ struct Gene {
 
   // Doubles to allow flexible manipulations (mutations/ crossovers). Will be
   // casetd to ints once applied as a move.
-  double angle_delta_;   // new_angle = angle_ +/-15.
-  double thrust_detla_;  // new_thrust = thrust_ +/-1.
+  double angle_delta_;  // new_angle = angle_ +/-15.
+  double thrust_detla_; // new_thrust = thrust_ +/-1.
 };
 
 struct Chromosome {
@@ -386,7 +397,8 @@ struct Chromosome {
     while (!state.IsTerminal()) {
       Move mv = state.RandomMove();
       state.MakeMove(mv);
-      if (DEBUG_V2) cerr << "ranom move: " << state.pos_ << endl;
+      if (DEBUG_V2)
+        cerr << "ranom move: " << state.pos_ << endl;
     }
     if (DEBUG_V2)
       cerr << "State finaly in: " << state.pos_ << endl
@@ -403,7 +415,7 @@ struct Chromosome {
   }
 
   void Mutation() {
-    for (Gene& gene : dna_) {
+    for (Gene &gene : dna_) {
       if (DoubleRand() < GENE_MUTATION_CHANCE) {
         gene.RandomMutation();
       }
@@ -412,17 +424,17 @@ struct Chromosome {
   deque<Gene> dna_;
 };
 
-bool cmp(const pair<double, Chromosome>& a, const pair<double, Chromosome>& b) {
+bool cmp(const pair<double, Chromosome> &a, const pair<double, Chromosome> &b) {
   return a.first < b.first;
 }
 
 struct Population {
   Population()
       : winning_idx_{nullopt},
-        individuals_{vector<Chromosome>(POPULATION_SIZE)},
-        beta_{BetaGenarator(1., 5.)} {}
+        individuals_{vector<Chromosome>(POPULATION_SIZE)}, beta_{BetaGenarator(
+                                                               1., 3.)} {}
 
-  void NextGeneration(const State& state) {
+  void NextGeneration(const State &state) {
     // Already know how to win.
     if (winning_idx_.has_value()) {
       if (DEBUG_V2)
@@ -432,7 +444,8 @@ struct Population {
     Sort(state);
     // Already know how to win.
     if (winning_idx_.has_value()) {
-      if (DEBUG_V2) cerr << "No new genration." << endl;
+      if (DEBUG_V2)
+        cerr << "No new genration." << endl;
       return;
     }
 
@@ -452,15 +465,15 @@ struct Population {
   }
 
   pair<Chromosome, Chromosome> SelectParents() {
-    const Chromosome& parent_1 =
+    const Chromosome &parent_1 =
         individuals_[beta_.Rand() * individuals_.size()];
-    const Chromosome& parent_2 =
+    const Chromosome &parent_2 =
         individuals_[beta_.Rand() * individuals_.size()];
     return {parent_1, parent_2};
   }
 
-  pair<Chromosome, Chromosome> Crossover(const Chromosome& parent_1,
-                                         const Chromosome& parent_2) {
+  pair<Chromosome, Chromosome> Crossover(const Chromosome &parent_1,
+                                         const Chromosome &parent_2) {
     Chromosome child_1, child_2;
     double rho = DoubleRand();
     for (size_t i = 0; i < CHROMOSOME_LENGTH; ++i) {
@@ -483,24 +496,25 @@ struct Population {
     return {child_1, child_2};
   }
 
-  Gene RolloutAndReturnBestGene(const State& state) {
+  Gene RolloutAndReturnBestGene(const State &state) {
     if (winning_idx_.has_value()) {
-      if (DEBUG_V2) cerr << "No rollout." << endl;
+      if (DEBUG_V0)
+        cerr << "No rollout." << endl;
       const int idx = winning_idx_.value();
       return individuals_[idx].Rollout();
     }
     Sort(state);
     Gene best = individuals_[0].dna_.front();
-    for (Chromosome& chromosome : individuals_) {
+    for (Chromosome &chromosome : individuals_) {
       chromosome.Rollout();
     }
     return best;
   }
 
-  void Sort(const State& state) {
+  void Sort(const State &state) {
     vector<pair<double, Chromosome>> zip;
     for (size_t i = 0; i < individuals_.size(); ++i) {
-      const Chromosome& chromosome = individuals_[i];
+      const Chromosome &chromosome = individuals_[i];
       ChromosomeScore score = chromosome.Evaluate(state);
       if (IsWinningScore(score)) {
         winning_idx_ = i;
@@ -512,7 +526,8 @@ struct Population {
     for (size_t i = 0; i < individuals_.size(); ++i) {
       individuals_[i] = zip[i].second;
     }
-    if (DEBUG_V1) cerr << "Sorted. Best score is " << zip[0].first << endl;
+    if (DEBUG_V0)
+      cerr << "Sorted. Best score is " << zip[0].first << endl;
   }
 
   optional<int> winning_idx_;
@@ -542,11 +557,11 @@ int main() {
   while (1) {
     int x;
     int y;
-    int hs;  // the horizontal speed (in m/s), can be negative.
-    int vs;  // the vertical speed (in m/s), can be negative.
-    int f;   // the quantity of remaining fuel in liters.
-    int r;   // the rotation angle in degrees (-90 to 90).
-    int p;   // the thrust power (0 to 4).
+    int hs; // the horizontal speed (in m/s), can be negative.
+    int vs; // the vertical speed (in m/s), can be negative.
+    int f;  // the quantity of remaining fuel in liters.
+    int r;  // the rotation angle in degrees (-90 to 90).
+    int p;  // the thrust power (0 to 4).
     cin >> x >> y >> hs >> vs >> f >> r >> p;
     cin.ignore();
     if (!engine.initialized_) {
