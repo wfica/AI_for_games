@@ -5,7 +5,8 @@
 using namespace std;
 
 constexpr bool DEBUG_V2 = false;
-constexpr bool DEBUG_V1 = true;
+constexpr bool DEBUG_V1 = false;
+constexpr bool DEBUG_V0 = true;
 constexpr double MARS_GRAVITY = 3.711;  // in m/s^2.
 constexpr int MAX_X = 7000;
 constexpr int MAX_Y = 3000;
@@ -245,29 +246,61 @@ struct State {
 
     Point flat_left = surface_[flat_ground_idx_];
     Point flat_right = surface_[flat_ground_idx_ + 1];
-    double x_1 = flat_left.first;
-    double x_2 = flat_right.first;
-    double y = flat_left.second;
+    double flat_x_1 = flat_left.first;
+    double flat_x_2 = flat_right.first;
+    double flat_y = flat_left.second;
 
-    if (DEBUG_V2 && y != flat_right.second)
+    if (DEBUG_V2 && flat_y != flat_right.second)
       cerr << "ERROR: flat ground wrong idx." << endl;
 
-    Point middle_grd = (flat_right + flat_left) / 2.0;
-    double score = dist2(middle_grd, pos_);
-    if(score < 100){
-       if(DEBUG_V1) cerr << "Distance error: " << score << endl;
-      score += abs(rotation_)*5;
-      if(DEBUG_V1) cerr << "Rotation error: " << score << endl;
+    double distance_penalty = max(
+        0., (pos_.first - (flat_x_1 + 150)) * (pos_.second - (flat_x_2 - 150)));
+    distance_penalty = sqrt(distance_penalty);
+
+    const double vv_mult = 5;
+    const double vh_mult = 1;
+    const double anMult = 1;
+
+    double vh_penalty = vh_mult * max(0., 1. + abs(hs_) - MAX_LANDING_HS + 2);
+    double vv_penalty = vv_mult * max(0., 1. + abs(vs_) - MAX_LANDING_VS + 4);
+    double anglePenalty = anMult * rotation_ * rotation_;
+    vh_penalty *= vh_penalty;
+    vv_penalty *= vv_penalty;
+
+    double vh_prev_penalty =
+        vh_mult * max(0., 1. + abs(prev_hs_) - MAX_LANDING_HS + 2);
+    double vv_prev_penalty =
+        vv_mult * max(0., 1. + abs(prev_vs_) - MAX_LANDING_VS + 4);
+    double angle_prev_penalty = anMult * prev_rotation_ * prev_rotation_;
+    vh_prev_penalty *= vh_prev_penalty;
+    vv_prev_penalty *= vv_prev_penalty;
+
+    vh_penalty = (1 + vh_penalty + vh_prev_penalty) / 2;
+    vv_penalty = (1 + vv_penalty + vv_prev_penalty) / 2;
+    anglePenalty = (1 + anglePenalty + angle_prev_penalty) / 2;
+
+    if (status_ == FLYING) {
+      anglePenalty = 0.;
+      distance_penalty /= 100.;
     }
 
-    if(score < 30){
-      score += max(0., abs(vs_) - MAX_LANDING_VS);
-      if(DEBUG_V1) cerr << "vertical speed error: " << score << endl;
-    }
+    double penalty;
+    if (!(flat_x_1  < pos_.first && pos_.first < flat_x_2 ))
+      penalty = 5;
+    else if (abs(flat_y - pos_.second) >= MAX_LANDING_VS)
+      penalty = 4;
+    else if (abs(vs_) >= MAX_LANDING_VS)
+      penalty = 3;
+    else if (abs(hs_) >= MAX_LANDING_HS)
+      penalty = 2;
+    else if (rotation_ != 0 || prev_rotation_ != 0)
+      penalty = 1;
+    else
+      penalty = 0;
+    penalty *= 20000.;
 
-
-
-    if (DEBUG_V1) cerr << "Score: " << score << endl;
+    double score =
+        distance_penalty + vh_penalty + vv_penalty + anglePenalty + penalty;
 
     return score;
   }
@@ -307,12 +340,13 @@ int RandomSimulationsUntilTimeout(const State& state, int miliseconds) {
 
 struct Gene {
   // Initialize randomly.
-  Gene() : angle_delta_{(rand() % 31) - 15}, thrust_detla_{(rand() % 3) - 1} {}
+  Gene() : angle_delta_{(rand() % 31) - 15}, thrust_detla_{1} {}
 
   Move ToMove(const State& state) const {
     int rotation =
         clamp(state.rotation_ + (int)angle_delta_, MIN_ROTATION, MAX_ROTATION);
-    int thrust = clamp(state.thrust_ + (int)thrust_detla_, MIN_THRUST, MAX_THRUST);
+    int thrust =
+        clamp(state.thrust_ + (int)thrust_detla_, MIN_THRUST, MAX_THRUST);
 
     if (DEBUG_V2) {
       if (abs(state.thrust_ - thrust) > 1)
@@ -340,12 +374,13 @@ struct Chromosome {
   Chromosome() : dna_{deque<Gene>(CHROMOSOME_LENGTH)} {}
 
   ChromosomeScore Evaluate(State state) const {
-    if (DEBUG_V2 )
+    if (DEBUG_V2)
       cerr << "Evaluate chromosome score for state" << state.pos_ << endl;
     for (size_t i = 0; (i < dna_.size()) && (!state.IsTerminal()); ++i) {
       Move mv = dna_[i].ToMove(state);
       state.MakeMove(mv);
-      if (DEBUG_V2) cerr << "DNA move: " << mv << "moved to " << state.pos_ << endl;
+      if (DEBUG_V2)
+        cerr << "DNA move: " << mv << "moved to " << state.pos_ << endl;
     }
     bool terminal_reached_within_dna = state.IsTerminal();
     while (!state.IsTerminal()) {
@@ -477,7 +512,7 @@ struct Population {
     for (size_t i = 0; i < individuals_.size(); ++i) {
       individuals_[i] = zip[i].second;
     }
-    if(DEBUG_V1) cerr << "Sorted. Best score is " << zip[0].first << endl;
+    if (DEBUG_V1) cerr << "Sorted. Best score is " << zip[0].first << endl;
   }
 
   optional<int> winning_idx_;
@@ -501,7 +536,7 @@ int main() {
 
   State engine;
   Population population;
-  int timeout = 950;
+  int timeout = 900;
 
   // game loop
   while (1) {
@@ -527,8 +562,8 @@ int main() {
       chrono::steady_clock::time_point end = chrono::steady_clock::now();
       diff = chrono::duration_cast<chrono::milliseconds>(end - begin).count();
     }
-    timeout = 95;
-    if (DEBUG_V2)
+    timeout = 85;
+    if (DEBUG_V0)
       cerr << "Time difference is = " << diff << " [ms] " << endl
            << "Num of generations: " << cnt << endl;
 
