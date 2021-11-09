@@ -16,10 +16,10 @@ constexpr int MAX_ROTATION = 90;
 constexpr int MIN_ROTATION = -90;
 constexpr int MAX_THRUST = 4;
 constexpr int MIN_THRUST = 0;
-constexpr size_t CHROMOSOME_LENGTH = 220;
+constexpr size_t CHROMOSOME_LENGTH = 230;
 constexpr size_t POPULATION_SIZE = 100;
 constexpr size_t ELITISM = 12;
-constexpr double GENE_MUTATION_CHANCE = 0.06;
+constexpr double GENE_MUTATION_CHANCE = 0.04;
 
 enum Status { FLYING, CRASHED, LANDED };
 using Point = pair<double, double>;                  // x, y.
@@ -295,7 +295,9 @@ struct State {
     }
 
     double penalty;
-    if (!(flat_x_1 < pos_.first && pos_.first < flat_x_2))
+    if (pos_.first >= MAX_X || pos_.second >= MAX_Y)
+      penalty = 6;
+    else if (!(flat_x_1 < pos_.first && pos_.first < flat_x_2))
       penalty = 5;
     else if (abs(flat_y - pos_.second) >= MAX_LANDING_VS)
       penalty = 4;
