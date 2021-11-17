@@ -21,7 +21,6 @@ constexpr int ALL_X[] = {-1, -1, 0, 1, 1, 1, 0, -1};
 constexpr int ALL_Y[] = {0, 1, 1, 1, 0, -1, -1, -1};
 
 // enum CanonicalDirection { N, E, S, W };
-enum AllDirection { N, NE, E, SE, S, SW, W, NW };
 
 /**
  * Tiles are encoded as follows:
@@ -32,7 +31,60 @@ enum AllDirection { N, NE, E, SE, S, SW, W, NW };
  **/
 using Tile = int;
 
+enum AllDirection { N, NE, E, SE, S, SW, W, NW };
+using Distances = array<int, 8>;
+
 inline bool IsOpenTile(const Tile tile) { return (tile & OPEN_TILE); }
+
+struct BoardIterator {
+ public:
+  BoardIterator(int n, int m, int x, int y, AllDirection dir, int wrap_x,
+                int wrap_y, int fin_x, int fin_y)
+      : n_{n},
+        m_{m},
+        curr_x{x},
+        curr_y{y},
+        direction{dir},
+        wrap_x_{wrap_x},
+        wrap_y_{wrap_y},
+        end_x{fin_x},
+        end_y{fin_y},
+        new_roll_{true} {
+    Move(end_x, end_y);
+  }
+
+  pair<int, int> Next() {
+    int old_x = curr_x, old_y = curr_y;
+    new_roll_ = Move(curr_x, curr_y);
+    return {old_x, old_y};
+  }
+
+  inline bool IsEnd() const { return end_x == curr_x && end_y == curr_y; }
+  inline bool IsNewRoll() const { return new_roll_; }
+  inline AllDirection GetDirection() const { return direction; }
+
+ private:
+  bool Move(int &x, int &y) {
+    int new_x = x + ALL_X[direction];
+    int new_y = y + ALL_Y[direction];
+    if (new_x > 0 && new_x <= n_ && new_y > 0 && new_y <= m_) {
+      x = new_x;
+      y = new_y;
+      return false;
+    }
+    x += wrap_x_;
+    y += wrap_y_;
+    return true;
+  }
+
+ public:
+  int n_, m_;
+  int curr_x, curr_y;
+  AllDirection direction;
+  int wrap_x_, wrap_y_;
+  int end_x, end_y;
+  bool new_roll_;
+};
 
 struct Board {
   Board() {}
@@ -41,6 +93,8 @@ struct Board {
     cin.ignore();
     // Pad the board with a wall on all 4 sides.
     board_ = vector<vector<Tile>>(n_ + 2, vector<Tile>(m_ + 2, CLOSED_TILE));
+    dist_ = vector<vector<Distances>>(
+        n_ + 2, vector<Distances>(m_ + 2, Distances({0, 0, 0, 0, 0, 0, 0, 0})));
     for (int i = 1; i <= n_; i++) {
       string row;  // A single row of the map consisting of passable terrain
                    // ('.') and walls ('#')
@@ -65,8 +119,7 @@ struct Board {
     }
   }
 
-  void Preprocess() {
-    // First, find all the primary points.
+  void FindPrimaryPoints() {
     for (int i = 1; i <= n_; ++i) {
       for (int j = 1; j <= m_; ++j) {
         if (IsOpen(i, j)) {
@@ -74,15 +127,72 @@ struct Board {
             int prev_x = i + CARDINAL_X[k];
             int prev_y = j + CARDINAL_Y[k];
             if (IsOpen(prev_x, prev_y)) {
-              CheckForcedNeighbour(i, j, prev_x, prev_y, k,
-                                   (k + 1) % 4);
-              CheckForcedNeighbour(i, j, prev_x, prev_y, k ,
-                                   (k + 3) % 4);
+              CheckForcedNeighbour(i, j, prev_x, prev_y, k, (k + 1) % 4);
+              CheckForcedNeighbour(i, j, prev_x, prev_y, k, (k + 3) % 4);
             }
           }
         }
       }
     }
+  }
+
+  BoardIterator GetIterator(const AllDirection dir) const {
+    switch (dir) {
+      case N:
+        return BoardIterator(n_, m_, n_, 1, dir, n_ - 1, 1, 1, m_);
+      case E:
+        return BoardIterator(n_, m_, 1, 1, dir, 1, -1 * m_ + 1, n_, m_);
+      case S:
+        return BoardIterator(n_, m_, 1, 1, dir, -1 * n_ + 1, 1, n_, m_);
+      case W:
+        return BoardIterator(n_, m_, 1, m_, dir, 1, m_ - 1, n_, 1);
+      default:
+        throw logic_error("Only canonical directions allowed.");
+    }
+  }
+
+  void SweepCardinalDirections() {
+    const array<AllDirection, 4> canonical_dirs = {N, E, S, W};
+    for (const AllDirection &dir : canonical_dirs) {
+      const AllDirection opposite_dir =
+          static_cast<AllDirection>((dir + 4) % 8);
+
+      BoardIterator itr = GetIterator(dir);
+
+      cerr << "New iterator going " << dir << endl;
+      int dist = -1;
+      bool jump_point_last_seen = false;
+      while (!itr.IsEnd()) {
+        if (itr.IsNewRoll()) {
+          dist = -1;
+          jump_point_last_seen = false;
+        }
+        const auto [x, y] = itr.Next();
+        cerr << "iterator position: " << x << " " << y << "\n";
+        if (!IsOpen(x, y)) {
+          dist = -1;
+          jump_point_last_seen = false;
+          dist_[x][y][opposite_dir] = 0;
+
+        } else {  // IsOpen(Tile)
+          dist++;
+          if (jump_point_last_seen) {
+            dist_[x][y][opposite_dir] = dist;
+          } else {  // Wall last seen
+            dist_[x][y][opposite_dir] = -1 * dist;
+          }
+          if (JumpPoint(x, y, dir)) {
+            dist = 0;
+            jump_point_last_seen = true;
+          }
+        }
+      }
+    }
+  }
+
+  void Preprocess() {
+    FindPrimaryPoints();
+    SweepCardinalDirections();
   }
 
   void Print() {
@@ -96,11 +206,26 @@ struct Board {
     }
   }
   inline bool IsOpen(int x, int y) { return IsOpenTile(board_[x][y]); }
+  inline bool JumpPoint(int x, int y, AllDirection dir) {
+    return ((dir & 1) == 0) && (board_[x][y] & (1 << (1 + (dir / 2))));
+  }
 
   int n_;  // Height of the map
   int m_;  // Width of the map
   vector<vector<Tile>> board_;
+  vector<vector<Distances>> dist_;
 };
+
+void DebugPrintDist(const Board &board, const AllDirection dir) {
+  cerr << "DebugPrintDist in direction " << dir << "\n";
+  for (int i = 1; i <= board.n_; ++i) {
+    for (int j = 1; j <= board.m_; ++j) {
+      cerr << board.dist_[i][j][dir] << " ";
+      if (board.dist_[i][j][dir] < 10) cerr << " ";
+    }
+    cerr << "\n";
+  }
+}
 
 /**
  * Compute the proper wall / jump point distances, according to the
@@ -110,6 +235,12 @@ int main() {
   Board board;
   board.ReadBoard();
   board.Preprocess();
+
+  DebugPrintDist(board, N);
+  DebugPrintDist(board, E);
+  DebugPrintDist(board, S);
+  DebugPrintDist(board, W);
+
   board.Print();
   // Write an action using cout. DON'T FORGET THE "<< endl"
   // To debug: cerr << "Debug messages..." << endl;
