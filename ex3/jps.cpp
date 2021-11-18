@@ -12,6 +12,10 @@ ostream &operator<<(ostream &os, const pair<T, C> &x) {
   os << x.first << " " << x.second;
   return os;
 }
+template <typename T>
+int sgn(T val) {
+  return (T(0) < val) - (val < T(0));
+}
 
 constexpr int OPEN_TILE = 1;
 constexpr int CLOSED_TILE = 0;
@@ -139,15 +143,20 @@ struct Board {
   BoardIterator GetIterator(const AllDirection dir) const {
     switch (dir) {
       case N:
-        return BoardIterator(n_, m_, n_, 1, dir, n_ - 1, 1, 1, m_);
+      case NE:
+        return BoardIterator(n_, m_, n_, 1, N, n_ - 1, 1, 1, m_);
       case E:
-        return BoardIterator(n_, m_, 1, 1, dir, 1, -1 * m_ + 1, n_, m_);
+        return BoardIterator(n_, m_, 1, 1, E, 1, -1 * m_ + 1, n_, m_);
       case S:
-        return BoardIterator(n_, m_, 1, 1, dir, -1 * n_ + 1, 1, n_, m_);
+      case SE:
+        return BoardIterator(n_, m_, 1, 1, S, -1 * n_ + 1, 1, n_, m_);
       case W:
-        return BoardIterator(n_, m_, 1, m_, dir, 1, m_ - 1, n_, 1);
+      case SW:
+        return BoardIterator(n_, m_, 1, m_, W, 1, m_ - 1, n_, 1);
+      case NW:
+        return BoardIterator(n_, m_, n_, m_, W, -1, m_ - 1, 1, 1);
       default:
-        throw logic_error("Only canonical directions allowed.");
+        throw logic_error("Only 8 directions allowed.");
     }
   }
 
@@ -159,7 +168,7 @@ struct Board {
 
       BoardIterator itr = GetIterator(dir);
 
-      cerr << "New iterator going " << dir << endl;
+      // cerr << "New iterator going " << dir << endl;
       int dist = -1;
       bool jump_point_last_seen = false;
       while (!itr.IsEnd()) {
@@ -168,7 +177,7 @@ struct Board {
           jump_point_last_seen = false;
         }
         const auto [x, y] = itr.Next();
-        cerr << "iterator position: " << x << " " << y << "\n";
+        // cerr << "iterator position: " << x << " " << y << "\n";
         if (!IsOpen(x, y)) {
           dist = -1;
           jump_point_last_seen = false;
@@ -190,9 +199,68 @@ struct Board {
     }
   }
 
+  void SweepNonCardinalDirections() {
+    const array<AllDirection, 4> non_canonical_dirs = {NE, SE, SW, NW};
+    for (const AllDirection &dir : non_canonical_dirs) {
+      const AllDirection opposite_dir =
+          static_cast<AllDirection>((dir + 4) % 8);
+
+      BoardIterator itr = GetIterator(dir);
+
+      // cerr << "New iterator going " << dir << endl;
+      while (!itr.IsEnd()) {
+        const auto [x, y] = itr.Next();
+        // cerr << "iterator position: " << x << " " << y << "\n";
+        if (IsOpen(x, y)) {
+          int diag_neigh_x = x + ALL_X[opposite_dir];
+          int diag_neigh_y = y + ALL_Y[opposite_dir];
+
+          int side_1_neigh_x = x + ALL_X[(opposite_dir + 1) % 8];
+          int side_1_neigh_y = y + ALL_Y[(opposite_dir + 1) % 8];
+
+          int side_2_neigh_x = x + ALL_X[(opposite_dir + 7) % 8];
+          int side_2_neigh_y = y + ALL_Y[(opposite_dir + 7) % 8];
+
+          if (!IsOpen(diag_neigh_x, diag_neigh_y) ||
+              !IsOpen(side_1_neigh_x, side_1_neigh_y) ||
+              !IsOpen(side_2_neigh_x, side_2_neigh_y)) {
+            // Wall one away.
+            dist_[x][y][opposite_dir] = 0;
+          } else if (dist_[diag_neigh_x][diag_neigh_y][(opposite_dir + 1) % 8] >
+                         0 ||
+                     dist_[diag_neigh_x][diag_neigh_y][(opposite_dir + 7) % 8] >
+                         0) {
+            // Streight jump point one away.
+            dist_[x][y][opposite_dir] = 1;
+          } else {
+            // Increment from last
+            int jump_distance = dist_[diag_neigh_x][diag_neigh_y][opposite_dir];
+            dist_[x][y][opposite_dir] =
+                jump_distance > 0 ? jump_distance + 1 : jump_distance - 1;
+          }
+        }
+      }
+    }
+  }
+
   void Preprocess() {
     FindPrimaryPoints();
     SweepCardinalDirections();
+    SweepNonCardinalDirections();
+  }
+
+  void PrintDistances() {
+    for (int i = 1; i <= n_; ++i) {
+      for (int j = 1; j <= m_; ++j) {
+        if (IsOpen(i, j)) {
+          cout << j-1 << " " << i-1;
+          for (int dir = 0; dir < 8; ++dir) {
+            cout << " " << dist_[i][j][dir];
+          }
+          cout << "\n";
+        }
+      }
+    }
   }
 
   void Print() {
@@ -236,12 +304,17 @@ int main() {
   board.ReadBoard();
   board.Preprocess();
 
-  DebugPrintDist(board, N);
-  DebugPrintDist(board, E);
-  DebugPrintDist(board, S);
-  DebugPrintDist(board, W);
+  // DebugPrintDist(board, N);
+  // DebugPrintDist(board, E);
+  // DebugPrintDist(board, S);
+  // DebugPrintDist(board, W);
 
-  board.Print();
+  // DebugPrintDist(board, NE);
+  // DebugPrintDist(board, SE);
+  // DebugPrintDist(board, SW);
+  // DebugPrintDist(board, NW);
+
+  board.PrintDistances();
   // Write an action using cout. DON'T FORGET THE "<< endl"
   // To debug: cerr << "Debug messages..." << endl;
 
