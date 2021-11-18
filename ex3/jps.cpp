@@ -230,7 +230,7 @@ struct Board {
                          0 ||
                      dist_[diag_neigh_x][diag_neigh_y][(opposite_dir + 7) % 8] >
                          0) {
-            // Streight jump point one away.
+            // Straight jump point one away.
             dist_[x][y][opposite_dir] = 1;
           } else {
             // Increment from last

@@ -7,7 +7,7 @@ CC = g++
 CFLAGS  = -std=c++17 -Wall -Wextra 
 
 # the build target executable:
-TARGET = jps
+TARGET = runtime
 
 all: $(TARGET)
 
