@@ -19,6 +19,25 @@ constexpr array<int, num_M> monster_view_range = {-1, 0, 1, 2, 2, 3};
 constexpr array<int, num_M> monster_attack_range = {-1, 0, 1, 1, 2, 3};
 constexpr array<int, num_M> monster_damage = {-1, 0, 1, 2, 2, 3};
 
+using MonsterCmpT = pair<MonsterT, pair<int, int>>;
+
+struct MonsterCmp {
+  bool operator()(const MonsterCmpT& a, const MonsterCmpT& b) const {
+    const auto [ma, pa] = a;
+    const auto [mb, pb] = b;
+    if (monster_attack_range[ma] > monster_attack_range[mb] ||
+        (monster_attack_range[ma] == monster_attack_range[mb] &&
+         monster_damage[ma] > monster_damage[mb])) {
+      return true;
+    }
+    if (pa.first < pb.first ||
+        (pa.first == pb.first && pa.second < pb.second)) {
+      return true;
+    }
+    return false;
+  }
+};
+
 struct Monster {
   Monster() : type{None}, health{0} {}
   MonsterT type;
@@ -39,6 +58,7 @@ inline int Value(const ItemT item) { return item_value[item]; }
 inline ItemT ToItemT(int x) { return static_cast<ItemT>(x % num_I + 1); }
 
 enum Weapon { WSword, WHammer, WScythe, WBow };
+
 const vector<vector<vector<pair<int, int>>>> weapon_range = {
     {{{-1, 0}}, {{0, 1}}, {{1, 0}}, {{0, -1}}},  // sword
     {{{-1, -1}, {-1, 0}, {-1, 1}},
@@ -125,7 +145,7 @@ struct Board {
   int exit_x, exit_y;
   int vst[N][M];
   int parent[N][M];
-  vector<pair<int, int>> dangerous_monsters;
+  set<pair<MonsterT, pair<int, int>>, MonsterCmp> dangerous_monsters;
 
   inline bool OnBoard(int x, int y) {
     return x >= 0 && y >= 0 && x < N && y < M;
@@ -141,10 +161,10 @@ struct Board {
     return true;
   }
 
-  bool InRange(int monster_x, int monster_y, Weapon w) {
+  bool InRange(int monster_x_delta, int monster_y_delta, Weapon w) {
     for (const auto& poss : weapon_range[w]) {
       for (const auto [x_delta, y_delta] : poss) {
-        if (hero.x + x_delta == monster_x && hero.y + y_delta == monster_y) {
+        if (x_delta == monster_x_delta && y_delta == monster_y_delta) {
           return true;
         }
       }
@@ -154,14 +174,18 @@ struct Board {
 
   void DealWithMonsters() {
     while (!dangerous_monsters.empty()) {
-      const auto [mx, my] = dangerous_monsters.back();
-      dangerous_monsters.pop_back();
+      const auto& iter = dangerous_monsters.begin();
+      const auto [monster_type, monster_pos] = *iter;
+      const auto [mx_delta, my_delta] = monster_pos;
+      dangerous_monsters.erase(iter);
       const array<Weapon, 4> weapon_order = {WScythe, WBow, WHammer, WSword};
       for (const Weapon w : weapon_order) {
         if (hero.charges[w] < 1) continue;
-        if (InRange(mx, my, w)) {
-          cout << "ATTACK " << w << " " << my << " " << mx << endl;
+        if (InRange(mx_delta, my_delta, w)) {
+          cout << "ATTACK " << w << " " << my_delta + hero.y << " "
+               << mx_delta + hero.x << endl;
           ReadInput();
+          break;
         }
       }
     }
@@ -262,14 +286,15 @@ struct Board {
         tiles[ey][ex].monster.type = ToMonsterT(etype);
         tiles[ey][ex].monster.health = evalue;
         if (DangerousMonster(tiles[ey][ex].monster.type)) {
-          dangerous_monsters.push_back({ey, ex});
+          dangerous_monsters.insert(
+              {tiles[ey][ex].monster.type, {ey - y, ex - x}});
         }
       }
     }
   }
 
   void ClearBoardInHeroRange() {
-    dangerous_monsters.resize(0);
+    dangerous_monsters.clear();
     for (int i = -3; i < 4; ++i) {
       for (int j = -3; j < 4; ++j) {
         if (i == 0 && j == 0) continue;
