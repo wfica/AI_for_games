@@ -25,6 +25,7 @@ struct Monster {
   int health;
 };
 
+inline bool DangerousMonster(const MonsterT m) { return m != None && m != Box; }
 inline int ViewRange(const MonsterT m) { return monster_view_range[m]; }
 inline int AttackRange(const MonsterT m) { return monster_attack_range[m]; }
 inline int Damage(const MonsterT m) { return monster_damage[m]; }
@@ -36,6 +37,37 @@ constexpr array<int, num_I> item_value = {0, 10000, -1, 100, 10, 1, 2, 3};
 inline int Value(const ItemT item) { return item_value[item]; }
 
 inline ItemT ToItemT(int x) { return static_cast<ItemT>(x % num_I + 1); }
+
+enum Weapon { WSword, WHammer, WScythe, WBow };
+const vector<vector<vector<pair<int, int>>>> weapon_range = {
+    {{{-1, 0}}, {{0, 1}}, {{1, 0}}, {{0, -1}}},  // sword
+    {{{-1, -1}, {-1, 0}, {-1, 1}},
+     {{-1, 0}, {-1, 1}, {0, 1}},
+     {{-1, 1}, {0, 1}, {1, 1}},
+     {{0, 1}, {1, 1}, {1, 0}},
+     {{1, 1}, {1, 0}, {1, -1}},
+     {{1, 0}, {1, -1}, {0, -1}},
+     {{1, -1}, {0, -1}, {-1, -1}},
+     {{0, -1}, {-1, -1}, {-1, 0}}},  // hammer
+    {{{-1, 0}, {-2, 0}},
+     {{-1, 1}, {-2, 2}},
+     {{0, 1}, {0, 2}},
+     {{1, 1}, {2, 2}},
+     {{1, 0}, {2, 0}},
+     {{1, -1}, {2, -2}},
+     {{0, -1}, {0, -2}},
+     {{-1, -1}, {-2, -2}}},  // scythe
+    {{{-3, -3}}, {{-3, -2}}, {{-3, -1}}, {{-3, 0}},  {{-3, 1}},  {{-3, 2}},
+     {{-3, 3}},  {{-2, -3}}, {{-2, -2}}, {{-2, -1}}, {{-2, 0}},  {{-2, 1}},
+     {{-2, 2}},  {{-2, 3}},  {{-1, -3}}, {{-1, -2}}, {{-1, -1}}, {{-1, 0}},
+     {{-1, 1}},  {{-1, 2}},  {{-1, 3}},  {{0, -3}},  {{0, -2}},  {{0, -1}},
+     {{0, 0}},   {{0, 1}},   {{0, 2}},   {{0, 3}},   {{1, -3}},  {{1, -2}},
+     {{1, -1}},  {{1, 0}},   {{1, 1}},   {{1, 2}},   {{1, 3}},   {{2, -3}},
+     {{2, -2}},  {{2, -1}},  {{2, 0}},   {{2, 1}},   {{2, 2}},   {{2, 3}},
+     {{3, -3}},  {{3, -2}},  {{3, -1}},  {{3, 0}},   {{3, 1}},   {{3, 2}},
+     {{3, 3}}}  // bow
+};
+constexpr array<int, 4> weapon_damage = {10, 6, 7, 8};
 
 struct Tile {
   Tile() : item{Nothing}, discovered{false} {}
@@ -52,14 +84,14 @@ struct Hero {
         y{y_},
         health{health_},
         score{score_},
-        charges_hammer{charges_hammer_},
-        charges_scythe{charges_scythe_},
-        charges_bow{charges_bow_} {}
+        charges{{INT_MAX, charges_hammer_, charges_scythe_, charges_bow_}} {}
   int x, y, health;
-  int score;           // current score
-  int charges_hammer;  // how many times the hammer can be used
-  int charges_scythe;  // how many times the scythe can be used
-  int charges_bow;     // how many times the bow can be used
+  int score;  // current score
+  array<int, 4> charges;
+  //   int charges_sword;
+  //   int charges_hammer;  // how many times the hammer can be used
+  //   int charges_scythe;  // how many times the scythe can be used
+  //   int charges_bow;     // how many times the bow can be used
 };
 
 struct Step {
@@ -92,42 +124,93 @@ struct Board {
   Hero hero;
   int exit_x, exit_y;
   int vst[N][M];
+  int parent[N][M];
+  vector<pair<int, int>> dangerous_monsters;
 
   inline bool OnBoard(int x, int y) {
     return x >= 0 && y >= 0 && x < N && y < M;
   }
 
   inline bool ValidStep(int x, int y) {
-    if (!OnBoard(x, y) || tiles[x][y].monster.type != None ||
+    if (!OnBoard(x, y) || DangerousMonster(tiles[x][y].monster.type) ||
         tiles[x][y].item == Obstacle) {
+      cerr << "Not a valid move" << OnBoard(x, y) << " "
+           << tiles[x][y].monster.type << " " << tiles[x][y].item << endl;
       return false;
     }
     return true;
   }
 
-  void dfs(int cnt) {
-    ReadInput();
+  bool InRange(int monster_x, int monster_y, Weapon w) {
+    for (const auto& poss : weapon_range[w]) {
+      for (const auto [x_delta, y_delta] : poss) {
+        if (hero.x + x_delta == monster_x && hero.y + y_delta == monster_y) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
 
-    if (exit_x != -1) {
-      // known exit.
-      cout << "MOVE " << exit_y << " " << exit_x << endl;
-    } else {
-      // undiscovered exit.
-      for (int i = 0; i < 4; ++i) {
-        int x = hero.x + X[i];
-        int y = hero.y + Y[i];
-        if (!ValidStep(x, y)) continue;
-        if (vst[x][y]) continue;
-        cout << "MOVE " << y << " " << x << endl;
-        dfs(cnt);
+  void DealWithMonsters() {
+    while (!dangerous_monsters.empty()) {
+      const auto [mx, my] = dangerous_monsters.back();
+      dangerous_monsters.pop_back();
+      const array<Weapon, 4> weapon_order = {WScythe, WBow, WHammer, WSword};
+      for (const Weapon w : weapon_order) {
+        if (hero.charges[w] < 1) continue;
+        if (InRange(mx, my, w)) {
+          cout << "ATTACK " << w << " " << my << " " << mx << endl;
+          ReadInput();
+        }
       }
     }
   }
 
+  void dfs(int cnt) {
+    cerr << "new dfs" << endl;
+    vst[hero.x][hero.y] = cnt;
+    cerr << "hero at " << hero.x << " " << hero.y << " in dfs " << cnt << endl;
+    DealWithMonsters();
+    if (exit_x != -1) {
+      // known exit.
+      //    parent[x][y] = hero.x * M + hero.y;
+      while (1) {
+        cout << "MOVE " << exit_y << " " << exit_x << " to the exit!" << endl;
+        ReadInput();
+      }
+      // return;
+    }
+    // undiscovered exit.
+    for (int i = 0; i < 4; ++i) {
+      int x = hero.x + X[i];
+      int y = hero.y + Y[i];
+      cerr << "considering i-th move" << i << " to " << x << " " << y
+           << " in dfs " << cnt << endl;
+      cerr << "with hero at " << hero.x << " " << hero.y << endl;
+      if (!ValidStep(x, y)) continue;
+      if (vst[x][y] == cnt) continue;
+      parent[x][y] = hero.x * M + hero.y;
+      cout << "MOVE " << y << " " << x << " forward " << endl;
+      ReadInput();
+      dfs(cnt);
+    }
+    if (parent[hero.x][hero.y] != -1) {
+      int x = parent[hero.x][hero.y] / M;
+      int y = parent[hero.x][hero.y] % M;
+      cout << "MOVE " << y << " " << x << " going back!" << endl;
+      ReadInput();
+    }
+  }
+
   void Play() {
-    for (int r = 1; r < 151; ++r) {
-      for (int i = 0; i < N; ++i)
-        for (int j = 0; j < M; ++j) vst[i][j] = 0;
+    for (int r = 1; r < 2; ++r) {
+      for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < M; ++j) {
+          vst[i][j] = 0;
+          //   parent[i][j] = -1;
+        }
+      }
       dfs(r);
     }
   }
@@ -178,16 +261,21 @@ struct Board {
         // monster.
         tiles[ey][ex].monster.type = ToMonsterT(etype);
         tiles[ey][ex].monster.health = evalue;
+        if (DangerousMonster(tiles[ey][ex].monster.type)) {
+          dangerous_monsters.push_back({ey, ex});
+        }
       }
     }
   }
 
   void ClearBoardInHeroRange() {
+    dangerous_monsters.resize(0);
     for (int i = -3; i < 4; ++i) {
       for (int j = -3; j < 4; ++j) {
         if (i == 0 && j == 0) continue;
         int x = hero.x + i;
         int y = hero.y + j;
+        if (!OnBoard(x, y)) continue;
         tiles[x][y] = Tile();
       }
     }
@@ -196,5 +284,6 @@ struct Board {
 
 int main() {
   Board board;
+  board.ReadInput();
   board.Play();
 }
