@@ -61,6 +61,8 @@ inline MonsterT ToMonsterT(int x) { return static_cast<MonsterT>(x % num_M); }
 enum ItemT { Nothing, Exit, Obstacle, Treasure, Potion, Hammer, Scythe, Bow };
 constexpr int num_I = 8;
 constexpr array<int, num_I> item_value = {0, 10000, -1, 100, 10, 1, 2, 3};
+constexpr array<int, num_I> item_priority = {0,   100, -100, 600,
+                                             200, 300, 400,  500};
 inline int Value(const ItemT item) { return item_value[item]; }
 
 inline ItemT ToItemT(int x) { return static_cast<ItemT>(x % num_I + 1); }
@@ -150,7 +152,7 @@ struct Move {
 };
 
 struct Board {
-  Board() : exit_x{-1}, exit_y{-1}, aim_x{-1}, aim_y{-1} {
+  Board() : exit_x{-1}, exit_y{-1}, aim_x{-1}, aim_y{-1}, turn{0} {
     for (int i = 0; i < N; ++i)
       for (int j = 0; j < M; ++j) {
         vst[i][j] = false;
@@ -160,6 +162,7 @@ struct Board {
   Tile tiles[N][M];
   Hero hero;
   int exit_x, exit_y;
+  int turn;
 
   // monster data.
   set<pair<MonsterT, pair<int, int>>, MonsterCmp> dangerous_monsters;
@@ -168,7 +171,8 @@ struct Board {
   bool vst[N][M];
   bool in_queue[N][M];
   int aim_x, aim_y;
-  stack<pair<int, int>> points_to_visit;
+  // priority (larger comes out first), <x, y>
+  vector<pair<int, int>> points_to_visit;
 
   // bfs data.
   int dist[N][M];
@@ -189,12 +193,14 @@ struct Board {
         int nx = x + X[i];
         int ny = y + Y[i];
         // cerr << nx << " " << ny << endl;
+        // cerr << turn << " "<< (turn > 150) << " " << (tiles[nx][ny].item != Exit) << endl;
         // cerr << OnBoard(nx, ny) << " " <<  tiles[nx][ny].discovered << " " <<
         //     (dist[nx][ny] > dist[x][y] + 1) << " " <<  (tiles[nx][ny].item !=
         //     Obstacle) << " " << !DangerousMonster(tiles[nx][ny].monster.type)
         //     << endl;
         if (OnBoard(nx, ny) && tiles[nx][ny].discovered &&
             (dist[nx][ny] > dist[x][y] + 1) && tiles[nx][ny].item != Obstacle &&
+            ((turn > 150) || (tiles[nx][ny].item != Exit)) &&
             !DangerousMonster(tiles[nx][ny].monster.type)) {
           dist[nx][ny] = dist[x][y] + 1;
           parent[nx][ny] = {x, y};
@@ -202,6 +208,11 @@ struct Board {
         }
       }
     }
+
+    if (aim_x != -1)
+      cerr << "dist between hero: " << hero.x << " " << hero.y
+           << " and aim: " << aim_x << " " << aim_y
+           << " is: " << dist[aim_x][aim_y] << endl;
 
     /*
         cerr << "BFS\n";
@@ -218,13 +229,30 @@ struct Board {
         */
   }
 
-  pair<int, int> BacktrackFirstMoveToTheAim(int aim_x, int aim_y) {
-    while (parent[aim_x][aim_y] != pair<int, int>({hero.x, hero.y})) {
-      const auto [x, y] = parent[aim_x][aim_y];
-      aim_x = x;
-      aim_y = y;
+  pair<int, int> BacktrackFirstMoveToTheAim() {
+    int curr_x = aim_x;
+    int curr_y = aim_y;
+    while (parent[curr_x][curr_y] != pair<int, int>({hero.x, hero.y})) {
+      const auto [x, y] = parent[curr_x][curr_y];
+      curr_x = x;
+      curr_y = y;
     }
-    return {aim_x, aim_y};
+    return {curr_x, curr_y};
+  }
+
+  bool NeighbouringUnknown(int x, int y) {
+    for (int i = 0; i < 4; ++i) {
+      int nx = x + X[i];
+      int ny = y + Y[i];
+      if (OnBoard(nx, ny) && !tiles[nx][ny].discovered) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool OneStepNeighbours(int x, int y, int n_x, int n_y) {
+    return (abs(x - n_x) + abs(y - n_y) == 1);
   }
 
   inline bool OnBoard(int x, int y) {
@@ -234,8 +262,8 @@ struct Board {
   bool ValidStep(int x, int y) {
     if (!OnBoard(x, y) || DangerousMonster(tiles[x][y].monster.type) ||
         tiles[x][y].item == Obstacle) {
-      cerr << "Not a valid move" << OnBoard(x, y) << " "
-           << tiles[x][y].monster.type << " " << tiles[x][y].item << endl;
+      // cerr << "Not a valid move" << OnBoard(x, y) << " "
+      //      << tiles[x][y].monster.type << " " << tiles[x][y].item << endl;
       return false;
     }
     return true;
@@ -256,15 +284,17 @@ struct Board {
     if (dangerous_monsters.empty()) {
       return {};
     }
-    const auto& iter = dangerous_monsters.begin();
-    const auto [monster_type, monster_pos] = *iter;
-    const auto [mx_delta, my_delta] = monster_pos;
-    dangerous_monsters.erase(iter);
-    const array<Weapon, 4> weapon_order = {WScythe, WBow, WHammer, WSword};
-    for (const Weapon w : weapon_order) {
-      if (hero.charges[w] < 1) continue;
-      if (InRange(mx_delta, my_delta, w)) {
-        return Move(w, mx_delta + hero.x, my_delta + hero.y, "in range");
+    while (!dangerous_monsters.empty()) {
+      const auto& iter = dangerous_monsters.begin();
+      const auto [monster_type, monster_pos] = *iter;
+      const auto [mx_delta, my_delta] = monster_pos;
+      dangerous_monsters.erase(iter);
+      const array<Weapon, 4> weapon_order = {WScythe, WBow, WHammer, WSword};
+      for (const Weapon w : weapon_order) {
+        if (hero.charges[w] < 1) continue;
+        if (InRange(mx_delta, my_delta, w)) {
+          return Move(w, mx_delta + hero.x, my_delta + hero.y, "in range");
+        }
       }
     }
     cerr << "Wanted to attack but out of range." << endl;
@@ -279,7 +309,7 @@ struct Board {
            << endl;
       if (!ValidStep(x, y)) continue;
       if (vst[x][y] || in_queue[x][y]) continue;
-      points_to_visit.push({x, y});
+      points_to_visit.push_back({x, y});
       in_queue[x][y] = true;
     }
   }
@@ -290,32 +320,80 @@ struct Board {
       for (int j = -3; j <= 3; ++j) {
         int x = hero.x + i;
         int y = hero.y + j;
-        cerr << "considering adding a move to " << x << " " << y << endl;
+        // cerr << "considering adding a move to " << x << " " << y << endl;
         if (!ValidStep(x, y)) continue;
         if (vst[x][y] || in_queue[x][y]) continue;
-        if (dist[x][y] == INT_MAX) continue;
-        if (tiles[x][y].item != Nothing) {
-          interesting.push_back({x, y});
-        } else {
-          boring.push_back({x, y});
-        }
+        if (dist[x][y] == INT_MAX && tiles[x][y].item != Exit) continue;
+
+        points_to_visit.push_back({x, y});
+        in_queue[x][y] = true;
+        // if (tiles[x][y].item != Nothing) {
+        //   interesting.push_back({x, y});
+        // } else {
+        //   boring.push_back({x, y});
+        // }
       }
     }
-    // stack: push the boring one first;
-    for (const auto [x, y] : boring) {
-      points_to_visit.push({x, y});
-      in_queue[x][y] = true;
+    // // stack: push the boring one first;
+    // for (const auto [x, y] : boring) {
+    //   points_to_visit.push({x, y});
+    //   in_queue[x][y] = true;
+    // }
+    // // stack: then the interesting ones.
+    // sort(interesting.begin(), interesting.end(),
+    //      [&](const pair<int, int>& a, const pair<int, int>& b) -> bool {
+    //        ItemT item_a = tiles[a.first][a.second].item;
+    //        ItemT item_b = tiles[b.first][b.second].item;
+    //        if (item_a == Treasure) return false;
+    //        if (item_b == Treasure) return true;
+    //        return item_a < item_b;
+    //      });
+    // cerr << "interesting moves: ";
+    // for (const auto [x, y] : interesting) {
+    //   cerr << x << "," << y << "  ";
+    //   points_to_visit.push({x, y});
+    //   in_queue[x][y] = true;
+    // }
+    // cerr << endl;
+  }
+
+  void FindNewAim() {
+    int curr_idx = -1;
+    int curr_priority = INT_MIN;
+    for (int i = 0; i < static_cast<int>(points_to_visit.size()); ++i) {
+      const auto [x, y] = points_to_visit[i];
+      if(turn > 150) cerr << "pos new aim: " << x << " " << y;
+      int prio = item_priority[tiles[x][y].item];
+      if (NeighbouringUnknown(x, y)) {
+        prio += 1;
+      }
+      if (hero.health <= 10 && tiles[x][y].item == Potion) {
+        prio *= 10;
+      }
+      if (tiles[x][y].item == Treasure &&
+          OneStepNeighbours(x, y, hero.x, hero.y)) {
+        prio *= 10;
+      }
+      if (tiles[x][y].item == Treasure) {
+        prio -= abs(hero.x - x);
+        prio -= abs(hero.y - y);
+      }
+      if(turn > 150) cerr << " with probability: " << prio << endl;
+      if (prio > curr_priority) {
+        curr_priority = prio;
+        curr_idx = i;
+      }
     }
-    // stack: then the interesting ones.
-    for (const auto [x, y] : interesting) {
-      points_to_visit.push({x, y});
-      in_queue[x][y] = true;
-    }
+    aim_x = points_to_visit[curr_idx].first;
+    aim_y = points_to_visit[curr_idx].second;
+    points_to_visit.erase(points_to_visit.begin() + curr_idx);
   }
 
   Move NextMove() {
+    turn++;
     vst[hero.x][hero.y] = true;
-    cerr << "hero at " << hero.x << " " << hero.y << endl;
+    cerr << "hero at " << hero.x << " " << hero.y << " aiming at " << aim_x
+         << " " << aim_y << " in turn " << turn << endl;
 
     if (hero.x == aim_x && hero.y == aim_y) {
       cerr << "at the current aim" << endl;
@@ -336,15 +414,14 @@ struct Board {
 
     if (aim_x == -1 && !points_to_visit.empty()) {
       // no aim in mind and some goals on the list.
-      aim_x = points_to_visit.top().first;
-      aim_y = points_to_visit.top().second;
-      points_to_visit.pop();
+      FindNewAim();
     }
 
     if (aim_x != -1) {
       // has a set aim.
-      const auto [x, y] = BacktrackFirstMoveToTheAim(aim_x, aim_y);
-      return Move(x, y, " to the aim " + to_string(x) + " " + to_string(y));
+      const auto [x, y] = BacktrackFirstMoveToTheAim();
+      return Move(x, y,
+                  " to the aim " + to_string(aim_x) + " " + to_string(aim_y));
     }
 
     if (exit_x == -1) {

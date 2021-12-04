@@ -21,10 +21,18 @@ void Scythe(){
          << "}},";
   }  
 }
-int main() {
+
+void Bow(){
   for (int i = -3; i < 4; ++i) {
       for (int j = -3; j < 4; ++j) {
           cout << "{{" << i << ","<<j <<"}},";
       }
   }
+}
+
+int main() {
+  priority_queue<int> Q;
+  Q.push(1);
+  Q.push(2);
+  cout<< Q.top()<<endl;
 }
