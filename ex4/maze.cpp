@@ -6,8 +6,16 @@ using namespace std;
  * Make the hero reach the exit of the maze alive.
  **/
 
+
+// Do ulepszenia:
+// - puszczac bfs z exit/ bex exit - jak mamy zapas na exploracje to explorowac
+// - jak sasiaduje obok box to atakowac box 
+// - puszczac bfs z zablokowanym poitionem, odblokowac jak nic nie znajdzie lub jak hp < 10
+// - wrzucac uninteresting points i jak interesting puste to wziac cos z uninteresting gdzie da sie dojsc i jest na koncu mapy (najblizyszy taki?)
+// - wieszy priorytet na zdobywanie amunicji (jak jest blisko?)
 constexpr int N = 12;
 constexpr int M = 16;
+constexpr int MAX_NUM_TURNS = 150;
 constexpr int MAX_HERO_HEALTH = 20;
 constexpr array<int, 4> X = {-1, 0, 1, 0};
 constexpr array<int, 4> Y = {0, 1, 0, -1};
@@ -179,6 +187,7 @@ struct Board {
   pair<int, int> parent[N][M];
 
   void Bfs() {
+    bool more_treasure_possible = MoreTreasurePossible();
     for (int i = 0; i < N; ++i)
       for (int j = 0; j < M; ++j) dist[i][j] = INT_MAX;
     dist[hero.x][hero.y] = 0;
@@ -193,40 +202,43 @@ struct Board {
         int nx = x + X[i];
         int ny = y + Y[i];
         // cerr << nx << " " << ny << endl;
-        // cerr << turn << " "<< (turn > 150) << " " << (tiles[nx][ny].item != Exit) << endl;
-        // cerr << OnBoard(nx, ny) << " " <<  tiles[nx][ny].discovered << " " <<
+        // cerr << turn << " "<< (turn > MAX_NUM_TURNS/2) << " " << (tiles[nx][ny].item !=
+        // Exit) << endl; cerr << OnBoard(nx, ny) << " " <<
+        // tiles[nx][ny].discovered << " " <<
         //     (dist[nx][ny] > dist[x][y] + 1) << " " <<  (tiles[nx][ny].item !=
         //     Obstacle) << " " << !DangerousMonster(tiles[nx][ny].monster.type)
         //     << endl;
         if (OnBoard(nx, ny) && tiles[nx][ny].discovered &&
             (dist[nx][ny] > dist[x][y] + 1) && tiles[nx][ny].item != Obstacle &&
-            ((turn > 150) || (tiles[nx][ny].item != Exit)) &&
             !DangerousMonster(tiles[nx][ny].monster.type)) {
+          if (more_treasure_possible && (tiles[nx][ny].item == Exit) &&
+              (turn <= MAX_NUM_TURNS/2)) {
+            continue;
+          }
           dist[nx][ny] = dist[x][y] + 1;
           parent[nx][ny] = {x, y};
           Q.push({nx, ny});
         }
       }
     }
-
-    if (aim_x != -1)
-      cerr << "dist between hero: " << hero.x << " " << hero.y
-           << " and aim: " << aim_x << " " << aim_y
-           << " is: " << dist[aim_x][aim_y] << endl;
-
     /*
-        cerr << "BFS\n";
-        for (int i = 0; i < N; ++i) {
-          for (int j = 0; j < M; ++j) {
-            if (dist[i][j] == INT_MAX) {
-              cerr << "MAX ";
-            } else {
-              cerr << dist[i][j] << " ";
-            }
-          }
-          cerr << "\n";
-        }
-        */
+     if (aim_x != -1)
+       cerr << "dist between hero: " << hero.x << " " << hero.y
+            << " and aim: " << aim_x << " " << aim_y
+            << " is: " << dist[aim_x][aim_y] << endl;
+
+     cerr << "BFS\n";
+     for (int i = 0; i < N; ++i) {
+       for (int j = 0; j < M; ++j) {
+         if (dist[i][j] == INT_MAX) {
+           cerr << "MAX ";
+         } else {
+           cerr << dist[i][j] << " ";
+         }
+       }
+       cerr << "\n";
+     }
+     */
   }
 
   pair<int, int> BacktrackFirstMoveToTheAim() {
@@ -305,8 +317,8 @@ struct Board {
     for (int i = 0; i < 4; ++i) {
       int x = hero.x + X[i];
       int y = hero.y + Y[i];
-      cerr << "considering adding i-th move " << i << " to " << x << " " << y
-           << endl;
+      // cerr << "considering adding i-th move " << i << " to " << x << " " << y
+      //      << endl;
       if (!ValidStep(x, y)) continue;
       if (vst[x][y] || in_queue[x][y]) continue;
       points_to_visit.push_back({x, y});
@@ -357,28 +369,52 @@ struct Board {
     // cerr << endl;
   }
 
+  bool MoreTreasurePossible() {
+    for (int i = 0; i < N; ++i) {
+      for (int j = 0; j < M; ++j) {
+        if (i == hero.x && j == hero.y) continue;
+        if (!tiles[i][j].discovered || tiles[i][j].item == Treasure) {
+          cerr << "more treasure possible: " << i << " " << j << endl;
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   void FindNewAim() {
     int curr_idx = -1;
     int curr_priority = INT_MIN;
+    bool more_treasure_possible = MoreTreasurePossible();
+
+    cerr << "num of poss new aims: " << points_to_visit.size() << endl;
+    // cerr << "more treasure possible: " << more_treasure_possible << endl;
     for (int i = 0; i < static_cast<int>(points_to_visit.size()); ++i) {
       const auto [x, y] = points_to_visit[i];
-      if(turn > 150) cerr << "pos new aim: " << x << " " << y;
-      int prio = item_priority[tiles[x][y].item];
+      // cerr << "pos new aim: " << x << " " << y;
+      const ItemT item = tiles[x][y].item;
+      int prio = item_priority[item];
+      if (item == Exit && !more_treasure_possible) {
+        prio = INT_MAX;
+      }
+
+      if (item == Exit && turn <= MAX_NUM_TURNS/2) {
+        prio -= item_priority[item];
+      }
       if (NeighbouringUnknown(x, y)) {
         prio += 1;
       }
-      if (hero.health <= 10 && tiles[x][y].item == Potion) {
+      if (hero.health <= 10 && item == Potion) {
         prio *= 10;
       }
-      if (tiles[x][y].item == Treasure &&
-          OneStepNeighbours(x, y, hero.x, hero.y)) {
+      if (item == Treasure && OneStepNeighbours(x, y, hero.x, hero.y)) {
         prio *= 10;
       }
-      if (tiles[x][y].item == Treasure) {
+      if (item == Treasure) {
         prio -= abs(hero.x - x);
         prio -= abs(hero.y - y);
       }
-      if(turn > 150) cerr << " with probability: " << prio << endl;
+      // cerr << " with probability: " << prio << endl;
       if (prio > curr_priority) {
         curr_priority = prio;
         curr_idx = i;
@@ -415,6 +451,7 @@ struct Board {
     if (aim_x == -1 && !points_to_visit.empty()) {
       // no aim in mind and some goals on the list.
       FindNewAim();
+      cerr << "new aim " << aim_x << " " << aim_y << endl;
     }
 
     if (aim_x != -1) {
