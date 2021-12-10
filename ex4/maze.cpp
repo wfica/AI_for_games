@@ -6,13 +6,15 @@ using namespace std;
  * Make the hero reach the exit of the maze alive.
  **/
 
-
 // Do ulepszenia:
 // - puszczac bfs z exit/ bex exit - jak mamy zapas na exploracje to explorowac
-// - jak sasiaduje obok box to atakowac box 
-// - puszczac bfs z zablokowanym poitionem, odblokowac jak nic nie znajdzie lub jak hp < 10
-// - wrzucac uninteresting points i jak interesting puste to wziac cos z uninteresting gdzie da sie dojsc i jest na koncu mapy (najblizyszy taki?)
+// - jak sasiaduje obok box to atakowac box
+// - puszczac bfs z zablokowanym poitionem, odblokowac jak nic nie znajdzie lub
+// jak hp < 10
+// - wrzucac uninteresting points i jak interesting puste to wziac cos z
+// uninteresting gdzie da sie dojsc i jest na koncu mapy (najblizyszy taki?)
 // - wieszy priorytet na zdobywanie amunicji (jak jest blisko?)
+// - udoskonalic walke.
 constexpr int N = 12;
 constexpr int M = 16;
 constexpr int MAX_NUM_TURNS = 150;
@@ -46,6 +48,9 @@ struct MonsterCmp {
          monster_damage[ma] > monster_damage[mb])) {
       return true;
     }
+    if (abs(pa.first) + abs(pa.second) < abs(pb.first) + abs(pb.second)) {
+      return true;
+    }
     if (pa.first < pb.first ||
         (pa.first == pb.first && pa.second < pb.second)) {
       return true;
@@ -69,8 +74,9 @@ inline MonsterT ToMonsterT(int x) { return static_cast<MonsterT>(x % num_M); }
 enum ItemT { Nothing, Exit, Obstacle, Treasure, Potion, Hammer, Scythe, Bow };
 constexpr int num_I = 8;
 constexpr array<int, num_I> item_value = {0, 10000, -1, 100, 10, 1, 2, 3};
-constexpr array<int, num_I> item_priority = {0,   100, -100, 600,
-                                             200, 300, 400,  500};
+constexpr array<int, num_I> item_priority = {-600, 200, -10000, 400,
+                                             300,  500, 500,    500};
+constexpr int BOX_PRIO = 1000;
 inline int Value(const ItemT item) { return item_value[item]; }
 
 inline ItemT ToItemT(int x) { return static_cast<ItemT>(x % num_I + 1); }
@@ -160,7 +166,7 @@ struct Move {
 };
 
 struct Board {
-  Board() : exit_x{-1}, exit_y{-1}, aim_x{-1}, aim_y{-1}, turn{0} {
+  Board() : exit_x{-1}, exit_y{-1}, turn{0}, aim_x{-1}, aim_y{-1} {
     for (int i = 0; i < N; ++i)
       for (int j = 0; j < M; ++j) {
         vst[i][j] = false;
@@ -178,7 +184,8 @@ struct Board {
   // NextMove data.
   bool vst[N][M];
   bool in_queue[N][M];
-  int aim_x, aim_y;
+  int aim_x;
+  int aim_y;
   // priority (larger comes out first), <x, y>
   vector<pair<int, int>> points_to_visit;
 
@@ -202,9 +209,9 @@ struct Board {
         int nx = x + X[i];
         int ny = y + Y[i];
         // cerr << nx << " " << ny << endl;
-        // cerr << turn << " "<< (turn > MAX_NUM_TURNS/2) << " " << (tiles[nx][ny].item !=
-        // Exit) << endl; cerr << OnBoard(nx, ny) << " " <<
-        // tiles[nx][ny].discovered << " " <<
+        // cerr << turn << " "<< (turn > MAX_NUM_TURNS/2) << " " <<
+        // (tiles[nx][ny].item != Exit) << endl; cerr << OnBoard(nx, ny) << " "
+        // << tiles[nx][ny].discovered << " " <<
         //     (dist[nx][ny] > dist[x][y] + 1) << " " <<  (tiles[nx][ny].item !=
         //     Obstacle) << " " << !DangerousMonster(tiles[nx][ny].monster.type)
         //     << endl;
@@ -212,7 +219,7 @@ struct Board {
             (dist[nx][ny] > dist[x][y] + 1) && tiles[nx][ny].item != Obstacle &&
             !DangerousMonster(tiles[nx][ny].monster.type)) {
           if (more_treasure_possible && (tiles[nx][ny].item == Exit) &&
-              (turn <= MAX_NUM_TURNS/2)) {
+              (turn <= MAX_NUM_TURNS / 2)) {
             continue;
           }
           dist[nx][ny] = dist[x][y] + 1;
@@ -256,8 +263,12 @@ struct Board {
     for (int i = 0; i < 4; ++i) {
       int nx = x + X[i];
       int ny = y + Y[i];
-      if (OnBoard(nx, ny) && !tiles[nx][ny].discovered) {
-        return true;
+      if (OnBoard(nx, ny)) {
+        if (!tiles[nx][ny].discovered) {
+          return true;
+        } else if (tiles[nx][ny].monster.type != None) {
+          return true;
+        }
       }
     }
     return false;
@@ -296,12 +307,9 @@ struct Board {
     if (dangerous_monsters.empty()) {
       return {};
     }
-    while (!dangerous_monsters.empty()) {
-      const auto& iter = dangerous_monsters.begin();
-      const auto [monster_type, monster_pos] = *iter;
+    for (const auto& [monster_type, monster_pos] : dangerous_monsters) {
       const auto [mx_delta, my_delta] = monster_pos;
-      dangerous_monsters.erase(iter);
-      const array<Weapon, 4> weapon_order = {WScythe, WBow, WHammer, WSword};
+      const array<Weapon, 4> weapon_order = {WScythe, WBow, WSword, WHammer};
       for (const Weapon w : weapon_order) {
         if (hero.charges[w] < 1) continue;
         if (InRange(mx_delta, my_delta, w)) {
@@ -310,6 +318,37 @@ struct Board {
       }
     }
     cerr << "Wanted to attack but out of range." << endl;
+    int dist_orc = INT_MAX;
+    int orc_neigh_x = -1, orc_neigh_y = -1;
+    for (const auto& [monster_type, monster_pos] : dangerous_monsters) {
+      if (monster_type == Orc) {
+        const auto [mx_delta, my_delta] = monster_pos;
+        int abs_dist = max(abs(mx_delta), abs(my_delta));
+        if (abs_dist > 2) {
+          // orc not shooting at us.
+          continue;
+        }
+        for (int i = 0; i < 4; ++i) {
+          int nx = mx_delta + hero.x + X[i];
+          int ny = my_delta + hero.y + Y[i];
+
+          if (OnBoard(nx, ny) && dist[nx][ny] < dist_orc) {
+            dist_orc = dist[nx][ny];
+            orc_neigh_x = nx;
+            orc_neigh_y = ny;
+          }
+        }
+      }
+    }
+    if (orc_neigh_x != -1) {
+      return Move(orc_neigh_x, orc_neigh_y, " to the orc.");
+    }
+
+    if (aim_x != -1) {
+      points_to_visit.push_back({aim_x, aim_y});
+    }
+    aim_x = -1;
+    aim_y = -1;
     return {};
   }
 
@@ -388,33 +427,55 @@ struct Board {
     bool more_treasure_possible = MoreTreasurePossible();
 
     cerr << "num of poss new aims: " << points_to_visit.size() << endl;
+    if (exit_x != -1) {
+      cerr << "dist to exit: " << dist[exit_x][exit_y] << endl;
+    }
     // cerr << "more treasure possible: " << more_treasure_possible << endl;
     for (int i = 0; i < static_cast<int>(points_to_visit.size()); ++i) {
+      // cerr << i << " ";
       const auto [x, y] = points_to_visit[i];
-      // cerr << "pos new aim: " << x << " " << y;
-      const ItemT item = tiles[x][y].item;
-      int prio = item_priority[item];
-      if (item == Exit && !more_treasure_possible) {
-        prio = INT_MAX;
+      const int distance = dist[x][y];
+      if (distance == INT_MAX) {
+        // unreachable.
+        continue;
+      }
+      if (x == hero.x && y == hero.y) {
+        continue;
       }
 
-      if (item == Exit && turn <= MAX_NUM_TURNS/2) {
-        prio -= item_priority[item];
+      cerr << "pos new aim: " << x << " " << y;
+      const ItemT item = tiles[x][y].item;
+      int prio = -100 * distance;
+
+      if (tiles[x][y].monster.type == Box) {
+        prio += BOX_PRIO;
+      } else {
+        prio += item_priority[item];
       }
+      if (item == Exit && !more_treasure_possible) {
+        prio = INT_MAX / 10;
+      }
+      if (x == exit_x && y == exit_y && 150 - turn - 7 < dist[x][y]) {
+        prio = INT_MAX / 10;
+      }
+
+      // if (item == Exit && turn <= MAX_NUM_TURNS / 2) {
+      //   prio -= item_priority[item];
+      // }
       if (NeighbouringUnknown(x, y)) {
-        prio += 1;
+        prio += (1 << (turn / 10));
       }
-      if (hero.health <= 10 && item == Potion) {
-        prio *= 10;
+      if (item == Potion) {
+        if (hero.health <= 10) {
+          prio *= 10;
+        } else {
+          prio -= item_priority[item];
+        }
       }
-      if (item == Treasure && OneStepNeighbours(x, y, hero.x, hero.y)) {
-        prio *= 10;
+      if (x == exit_x && y == exit_y) {
+        cerr << "exit prob: " << prio << endl;
       }
-      if (item == Treasure) {
-        prio -= abs(hero.x - x);
-        prio -= abs(hero.y - y);
-      }
-      // cerr << " with probability: " << prio << endl;
+      cerr << " with probability: " << prio << endl;
       if (prio > curr_priority) {
         curr_priority = prio;
         curr_idx = i;
@@ -423,6 +484,8 @@ struct Board {
     aim_x = points_to_visit[curr_idx].first;
     aim_y = points_to_visit[curr_idx].second;
     points_to_visit.erase(points_to_visit.begin() + curr_idx);
+    cerr << "new aim is " << aim_x << " " << aim_y
+         << " with prio: " << curr_priority << endl;
   }
 
   Move NextMove() {
