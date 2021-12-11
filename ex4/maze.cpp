@@ -30,11 +30,16 @@ bool operator!=(const pair<int, int>& a, const pair<int, int>& b) {
   return !(a == b);
 }
 
+ostream& operator <<(ostream& out, const pair<int, int>& p){
+  out << p.first << "," << p.second;
+  return out;
+}
+
 enum MonsterT { None, Box, Skeleton, Gargoyle, Orc, Vampire };
 
 constexpr int num_M = 6;
 constexpr array<int, num_M> monster_view_range = {-1, 0, 1, 2, 2, 3};
-constexpr array<int, num_M> monster_attack_range = {-1, 0, 1, 1, 2, 3};
+constexpr array<int, num_M> monster_attack_range = {-1, 0, 1, 1, 2, 1};
 constexpr array<int, num_M> monster_damage = {-1, 0, 1, 2, 2, 3};
 
 using MonsterCmpT = pair<MonsterT, pair<int, int>>;
@@ -43,18 +48,34 @@ struct MonsterCmp {
   bool operator()(const MonsterCmpT& a, const MonsterCmpT& b) const {
     const auto [ma, pa] = a;
     const auto [mb, pb] = b;
+    cerr << "monster cmp" << ma << " " << pa << " || " << mb << " "<< pb ;
+    if( ma > mb){
+      cerr << "true\n";
+      return true;
+    }else if (ma < mb){
+      cerr << "false\n";
+      return false;
+    }
     if (monster_attack_range[ma] > monster_attack_range[mb] ||
         (monster_attack_range[ma] == monster_attack_range[mb] &&
          monster_damage[ma] > monster_damage[mb])) {
+      cerr << "true\n";
+
       return true;
     }
     if (abs(pa.first) + abs(pa.second) < abs(pb.first) + abs(pb.second)) {
+      cerr << "true\n";
+
       return true;
     }
     if (pa.first < pb.first ||
         (pa.first == pb.first && pa.second < pb.second)) {
+      cerr << "true\n";
+
       return true;
     }
+      cerr << "false\n";
+
     return false;
   }
 };
@@ -74,8 +95,8 @@ inline MonsterT ToMonsterT(int x) { return static_cast<MonsterT>(x % num_M); }
 enum ItemT { Nothing, Exit, Obstacle, Treasure, Potion, Hammer, Scythe, Bow };
 constexpr int num_I = 8;
 constexpr array<int, num_I> item_value = {0, 10000, -1, 100, 10, 1, 2, 3};
-constexpr array<int, num_I> item_priority = {-600, 200, -10000, 400,
-                                             300,  500, 500,    500};
+constexpr array<int, num_I> item_priority = {-600, 200,  -10000, 4000,
+                                             3000, 5000, 5000,   5000};
 constexpr int BOX_PRIO = 1000;
 inline int Value(const ItemT item) { return item_value[item]; }
 
@@ -309,7 +330,8 @@ struct Board {
     }
     for (const auto& [monster_type, monster_pos] : dangerous_monsters) {
       const auto [mx_delta, my_delta] = monster_pos;
-      const array<Weapon, 4> weapon_order = {WScythe, WBow, WSword, WHammer};
+      const array<Weapon, 4> weapon_order = { WSword, WScythe, WBow, WHammer};
+      cerr << " Monster at " << mx_delta + hero.x << " " <<  my_delta + hero.y << " of type " << monster_type << endl;
       for (const Weapon w : weapon_order) {
         if (hero.charges[w] < 1) continue;
         if (InRange(mx_delta, my_delta, w)) {
@@ -344,11 +366,11 @@ struct Board {
       return Move(orc_neigh_x, orc_neigh_y, " to the orc.");
     }
 
-    if (aim_x != -1) {
+    if (aim_x != -1 && InGraveDanger(aim_x, aim_y)) {
       points_to_visit.push_back({aim_x, aim_y});
+      aim_x = -1;
+      aim_y = -1;
     }
-    aim_x = -1;
-    aim_y = -1;
     return {};
   }
 
@@ -421,6 +443,38 @@ struct Board {
     return false;
   }
 
+  bool InDanger() {
+    for (int i = -3; i <= 3; ++i) {
+      for (int j = -3; j <= 3; ++j) {
+        int x = hero.x + i;
+        int y = hero.y + j;
+        if (OnBoard(x, y) && DangerousMonster(tiles[x][y].monster.type) &&
+            max(abs(i), abs(j)) -1 <=
+                monster_attack_range[tiles[x][y].monster.type]) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  bool InGraveDanger(int px, int py){
+    cerr << " in grave danger " << px << "" << py;
+    for (int i = -2; i <= 2; ++i) {
+      for (int j = -2; j <= 2; ++j) {
+        int x = px+ i;
+        int y = py + j;
+        if (OnBoard(x, y) && DangerousMonster(tiles[x][y].monster.type) &&
+            max(abs(i), abs(j))  <=
+                monster_attack_range[tiles[x][y].monster.type]) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  
+
   void FindNewAim() {
     int curr_idx = -1;
     int curr_priority = INT_MIN;
@@ -440,6 +494,10 @@ struct Board {
         continue;
       }
       if (x == hero.x && y == hero.y) {
+        continue;
+      }
+
+      if (vst[x][y]) {
         continue;
       }
 
@@ -463,15 +521,25 @@ struct Board {
       //   prio -= item_priority[item];
       // }
       if (NeighbouringUnknown(x, y)) {
-        prio += (1 << (turn / 10));
-      }
-      if (item == Potion) {
-        if (hero.health <= 10) {
-          prio *= 10;
+        if (exit_x == -1) {
+          prio += (1 << (turn / 10));
         } else {
-          prio -= item_priority[item];
+          prio += 1;
         }
       }
+      if (item == Potion) {
+        if (hero.health <= 10 && InDanger() ) {
+          prio *= 10;
+        } else {
+          prio -= item_priority[item]+600;
+        }
+      }
+      
+      if(InGraveDanger(x, y)){
+        prio -= 10;
+      }
+
+
       if (x == exit_x && y == exit_y) {
         cerr << "exit prob: " << prio << endl;
       }
